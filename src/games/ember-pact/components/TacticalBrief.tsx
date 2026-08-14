@@ -8,10 +8,11 @@ interface TacticalBriefProps {
   selectedId: string;
   selectionLocked: boolean;
   onSelect: (id: string) => void;
+  onCommit: () => void;
   onClose: () => void;
 }
 
-export function TacticalBrief({ combatants, selectedId, selectionLocked, onSelect, onClose }: TacticalBriefProps) {
+export function TacticalBrief({ combatants, selectedId, selectionLocked, onSelect, onCommit, onClose }: TacticalBriefProps) {
   const modalRef = useModalFocus({ active: true, initialFocus: ".ledger-enter", onDismiss: onClose });
   const chosen = combatants.find((combatant) => combatant.id === selectedId);
 
@@ -82,7 +83,7 @@ export function TacticalBrief({ combatants, selectedId, selectionLocked, onSelec
           <span><b>过载</b>第 13 轮起，行动结束承受递增真实伤害</span>
         </div>
 
-        <button type="button" className="ledger-enter" onClick={onClose}>
+        <button type="button" className="ledger-enter" onClick={onCommit}>
           {selectionLocked
             ? "返回战场"
             : `以${chosen?.displayName ?? "晨铸先锋"}的身份点亮熔炉`}

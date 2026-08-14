@@ -1,5 +1,6 @@
 import { Component, lazy, Suspense, useMemo, useState, type ErrorInfo, type ReactNode } from "react";
 import type { GameRegistration } from "../core/games/types";
+import { isModuleLoadError } from "./moduleLoadError";
 
 interface GameHostProps {
   registration: GameRegistration;
@@ -83,19 +84,6 @@ export function GameErrorView({ gameName, onExit, onRetry }: GameErrorViewProps)
       </div>
     </main>
   );
-}
-
-const MODULE_LOAD_ERROR_PATTERNS = [
-  /dynamically imported module/i,
-  /importing a module script failed/i,
-  /failed to fetch module script/i,
-  /chunkloaderror/i,
-  /loading chunk .* failed/i,
-];
-
-export function isModuleLoadError(error: Error): boolean {
-  return error.name === "ChunkLoadError"
-    || MODULE_LOAD_ERROR_PATTERNS.some((pattern) => pattern.test(error.message));
 }
 
 export function GameHost({ registration, onExit, reloadPage = () => window.location.reload() }: GameHostProps) {

@@ -87,6 +87,26 @@ describe("Twenty One engine", () => {
     expect(settled.payout).toBe(37.5);
   });
 
+  it("settles a dealer natural before the player can act", () => {
+    const settled = placeBet(
+      { ...createInitialState(() => 0.37), deck: stackedDeck(card("9"), card("K", "clubs"), card("7"), card("A", "clubs")) },
+      25,
+    );
+    expect(settled.phase).toBe("settled");
+    expect(settled.outcome).toBe("dealer");
+    expect(settled.reason).toBe("庄家 Blackjack");
+  });
+
+  it("pushes when both hands are natural blackjacks", () => {
+    const settled = placeBet(
+      { ...createInitialState(() => 0.37), deck: stackedDeck(card("A"), card("K", "clubs"), card("10", "hearts"), card("A", "diamonds")) },
+      25,
+    );
+    expect(settled.phase).toBe("settled");
+    expect(settled.outcome).toBe("push");
+    expect(settled.chips).toBe(STARTING_CHIPS);
+  });
+
   it("returns the stake on a push and keeps it on a loss", () => {
     const push = placeBet(
       { ...createInitialState(() => 0.5), deck: stackedDeck(card("A"), card("A", "clubs"), card("K"), card("K", "clubs")), chips: 200 },
@@ -116,6 +136,21 @@ describe("Twenty One engine", () => {
     expect(doubled.playerHand).toHaveLength(3);
     expect(doubled.phase).toBe("dealer-turn");
     expect(canDouble(doubled)).toBe(false);
+  });
+
+  it("loses the doubled stake when the double card busts", () => {
+    // 9 + 3 = 12：补到 10/J/Q/K 才会爆牌，两牌 11 点补任何牌都不可能爆。
+    const dealt = placeBet(
+      { ...createInitialState(() => 0.37), deck: stackedDeck(card("9"), card("3", "clubs"), card("3", "hearts"), card("4", "diamonds"), card("K", "hearts")) },
+      25,
+    );
+    expect(dealt.phase).toBe("player-turn");
+    const doubled = playerDouble(dealt);
+    expect(doubled.phase).toBe("settled");
+    expect(doubled.outcome).toBe("dealer");
+    expect(doubled.bet).toBe(50);
+    expect(doubled.chips).toBe(450);
+    expect(doubled.payout).toBe(-50);
   });
 
   it("only offers a double on the opening two cards with chips to cover it", () => {
@@ -189,6 +224,27 @@ describe("Twenty One engine", () => {
     }));
     expect(softSeventeen.phase).toBe("settled");
     expect(softSeventeen.outcome).toBe("push");
+  });
+
+  it("wins when the dealer busts", () => {
+    const dealt = placeBet(
+      { ...createInitialState(() => 0.37), deck: stackedDeck(card("10"), card("2", "clubs"), card("10", "hearts"), card("6", "diamonds"), card("7", "clubs"), card("7", "hearts")) },
+      25,
+    );
+    let turn = playerStand(dealt);
+    turn = dealerStep(turn);
+    turn = dealerStep(turn);
+    turn = dealerStep(turn);
+    expect(turn.phase).toBe("settled");
+    expect(turn.outcome).toBe("player");
+    expect(turn.reason).toBe("庄家爆牌");
+  });
+
+  it("reshuffles a fresh shoe when fewer than twenty cards remain", () => {
+    const initial = createInitialState(() => 0.37);
+    const thin = { ...initial, deck: initial.deck.slice(0, 19) };
+    const dealt = placeBet(thin, 25, () => 0.37);
+    expect(dealt.deck).toHaveLength(48);
   });
 
   it("compares final totals and rejects actions outside their phase", () => {

@@ -472,13 +472,16 @@ function resolveEndOfTurn(
     next = resolveTrueDamage(next, actorId, 2, "status", events);
     next = replaceCombatant(next, actorId, (combatant) => ({
       ...combatant,
-      statuses: burning.remainingTurns && burning.remainingTurns > 1
-        ? combatant.statuses.map((status) => status.id === "burning"
-          ? { ...status, remainingTurns: burning.remainingTurns! - 1 }
-          : status)
-        : removeStatus(combatant.statuses, "burning"),
+      // 与「破绽」「蓄势」一致：没有剩余回合的灼烧是永久的，只被净化移除。
+      statuses: burning.remainingTurns === undefined
+        ? combatant.statuses
+        : burning.remainingTurns > 1
+          ? combatant.statuses.map((status) => status.id === "burning"
+            ? { ...status, remainingTurns: burning.remainingTurns! - 1 }
+            : status)
+          : removeStatus(combatant.statuses, "burning"),
     }));
-    if (!burning.remainingTurns || burning.remainingTurns <= 1) {
+    if (burning.remainingTurns !== undefined && burning.remainingTurns <= 1) {
       events.push({
         kind: "status-removed",
         targetId: actorId,

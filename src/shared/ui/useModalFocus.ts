@@ -62,11 +62,13 @@ export function useModalFocus({ active, initialFocus, onDismiss }: ModalFocusOpt
       const first = focusable[0];
       const last = focusable.at(-1)!;
       const current = document.activeElement;
+      const inside = current !== null && modal.contains(current);
 
-      if (event.shiftKey && (current === first || !modal.contains(current))) {
+      // 焦点在弹层之外时也要拉回来：Shift+Tab 回绕到末位，Tab 回绕到首位。
+      if (event.shiftKey && (current === first || !inside)) {
         event.preventDefault();
         last.focus({ preventScroll: true });
-      } else if (!event.shiftKey && current === last) {
+      } else if (!event.shiftKey && (current === last || !inside)) {
         event.preventDefault();
         first.focus({ preventScroll: true });
       }

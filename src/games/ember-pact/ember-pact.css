@@ -615,6 +615,8 @@
   top: 64px;
   right: 14px;
   width: min(330px, calc(100% - 28px));
+  max-height: calc(100vh - 84px);
+  overflow-y: auto;
   padding: 18px;
   color: #244348;
   background: #f4efe3;

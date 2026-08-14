@@ -315,7 +315,9 @@ export function GuandanGame({ onExit }: GameRuntimeProps) {
               升级看头游那一队：队友第 2 名升 3 级，第 3 名升 2 级，第 4 名升 1 级。
               双方各自从 2 起打，先在 A 上再赢一局的一方打过 A，赢下整场。
             </p>
-            <p className="gd-rule-board__scope">暂不包含进贡还贡、木板/钢板和同花顺炸弹。</p>
+            <p className="gd-rule-board__scope">
+              暂不包含进贡还贡、木板/钢板和同花顺炸弹。本局惯例：两张相同的王可作对子；级牌大于 A、小于小王；A2345 是最小顺子。
+            </p>
             <button type="button" className="gd-rule-board__enter" onClick={() => { setShowRules(false); playSound("card"); }}>入席开牌 <span>→</span></button>
           </div>
         </div>

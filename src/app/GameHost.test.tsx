@@ -3,7 +3,8 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GameModule, GameRegistration } from "../core/games/types";
-import { GameHost, isModuleLoadError } from "./GameHost";
+import { GameHost } from "./GameHost";
+import { isModuleLoadError } from "./moduleLoadError";
 
 function createRegistration(load: NonNullable<GameRegistration["load"]>): GameRegistration {
   return {

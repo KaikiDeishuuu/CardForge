@@ -9,6 +9,7 @@ import {
   createDeck,
   createInitialState,
   generateLegalCombos,
+  getPlayer,
   levelsForPartnerPlace,
   passTurn,
   playCards,
@@ -92,6 +93,31 @@ describe("Guandan engine", () => {
     expect(canBeat(bomb, highPair)).toBe(true);
   });
 
+  it("ranks bombs by size first, then rank, with the four-joker bomb on top", () => {
+    const fourThrees = classifyCombo([card("3"), card("3", "clubs"), card("3", "diamonds"), card("3", "hearts")], "2")!;
+    const fourAces = classifyCombo([card("A"), card("A", "clubs"), card("A", "diamonds"), card("A", "hearts")], "2")!;
+    const fiveFours = classifyCombo([card("4"), card("4", "clubs"), card("4", "diamonds"), card("4", "hearts"), card("4", "spades")], "2")!;
+    const jokerBomb = classifyCombo([
+      card("small-joker", "joker"),
+      card("small-joker", "joker"),
+      card("big-joker", "joker"),
+      card("big-joker", "joker"),
+    ], "2")!;
+
+    expect(canBeat(fiveFours, fourAces)).toBe(true);
+    expect(canBeat(fourAces, fiveFours)).toBe(false);
+    expect(canBeat(fourAces, fourThrees)).toBe(true);
+    expect(canBeat(jokerBomb, fiveFours)).toBe(true);
+    expect(canBeat(fiveFours, jokerBomb)).toBe(false);
+  });
+
+  it("rejects jokers in straights, duplicate ranks and wild-joker pairs", () => {
+    expect(classifyCombo([card("3"), card("4"), card("5"), card("6"), card("small-joker")], "2")).toBeUndefined();
+    expect(classifyCombo([card("3"), card("3", "clubs"), card("4"), card("5"), card("6")], "2")).toBeUndefined();
+    expect(classifyCombo([card("small-joker", "joker"), card("2", "hearts")], "2")).toBeUndefined();
+    expect(classifyCombo([card("3"), card("3", "clubs"), card("3", "diamonds"), card("3", "hearts"), card("9")], "2")).toBeUndefined();
+  });
+
   it("plays a legal combo, removes cards and rotates to the next seat", () => {
     const pair = [card("7"), card("7", "clubs")];
     const game = state([
@@ -120,6 +146,40 @@ describe("Guandan engine", () => {
     game = passTurn(game, "west");
     expect(game.trick).toBeUndefined();
     expect(game.activePlayerId).toBe("human");
+  });
+
+  it("clears a trick without counting finished players as passers", () => {
+    const eastLead = card("3");
+    let game = state([
+      { ...player("human", []), finishedPlace: 1 },
+      player("east", [eastLead, card("K")]),
+      player("partner", [card("4")]),
+      player("west", [card("5")]),
+    ], { activePlayerId: "east", finishOrder: ["human"] });
+    game = playCards(game, "east", [eastLead.id]);
+    game = passTurn(game, "partner");
+    game = passTurn(game, "west");
+
+    expect(game.trick).toBeUndefined();
+    expect(game.activePlayerId).toBe("east");
+    expect(getPlayer(game, "east").hand).toHaveLength(1);
+  });
+
+  it("hands the lead to the next active seat when the trick actor just finished", () => {
+    const eastLast = card("3");
+    let game = state([
+      { ...player("human", []), finishedPlace: 1 },
+      player("east", [eastLast]),
+      player("partner", [card("4")]),
+      player("west", [card("5")]),
+    ], { activePlayerId: "east", finishOrder: ["human"] });
+    game = playCards(game, "east", [eastLast.id]);
+    expect(game.finishOrder).toEqual(["human", "east"]);
+    game = passTurn(game, "partner");
+    game = passTurn(game, "west");
+
+    expect(game.trick).toBeUndefined();
+    expect(game.activePlayerId).toBe("partner");
   });
 
   it("declares a winner when both partners finish", () => {

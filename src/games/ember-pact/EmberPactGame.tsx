@@ -40,7 +40,9 @@ export function EmberPactGame({ onExit }: GameRuntimeProps) {
   const active = getCombatant(state, state.activePlayerId);
   // 出战角色由开局选将决定，敌我分组随之翻转，不再假设人类固定是 dawn。
   const player = state.combatants.find((combatant) => combatant.controller === "human")!;
-  const isHumanTurn = state.status === "playing" && active?.controller === "human";
+  // 未在炉谱提交选将前冻结战场：重选只可能发生在对局开始之前，中途改选
+  // 也就永远不会通过重发牌抹掉已有进度。
+  const isHumanTurn = state.status === "playing" && active?.controller === "human" && setupComplete;
   // Derived, not stored: a combatant is thinking exactly while its move is pending.
   const aiThinking = state.status === "playing" && active?.controller === "ai" && !showBrief && !inspectedId;
   const validTargetIds = useMemo(
@@ -72,8 +74,8 @@ export function EmberPactGame({ onExit }: GameRuntimeProps) {
   }, [active, aiThinking, playSound, state]);
 
   useEffect(() => {
-    if (state.status === "finished") playSound("win");
-  }, [playSound, state.status]);
+    if (state.status === "finished") playSound(state.winner === player.team ? "win" : "tap");
+  }, [playSound, player.team, state.status, state.winner]);
 
   function handleSelect(uid: string) {
     if (!isHumanTurn) return;
@@ -104,8 +106,13 @@ export function EmberPactGame({ onExit }: GameRuntimeProps) {
     playSound("tap");
   }
 
-  function closeBrief() {
+  /** 只有显式提交才锁定选将；「×」与 Escape 只是收起炉谱，仍可重开重选。 */
+  function commitBrief() {
     setSetupComplete(true);
+    setShowBrief(false);
+  }
+
+  function dismissBrief() {
     setShowBrief(false);
   }
 
@@ -183,13 +190,15 @@ export function EmberPactGame({ onExit }: GameRuntimeProps) {
           <p>
             {state.status === "finished"
               ? "对局结束"
-              : aiThinking
-                ? `${active?.displayName}正在思考…`
-                : isHumanTurn
-                  ? selectedCard
-                    ? `选择「${getCard(selectedCard).name}」的目标`
-                    : "你的行动 · 选择一张手牌"
-                  : `${active?.displayName}的行动`}
+              : !setupComplete
+                ? "先在战术炉谱里选择出战角色"
+                : aiThinking
+                  ? `${active?.displayName}正在思考…`
+                  : isHumanTurn
+                    ? selectedCard
+                      ? `选择「${getCard(selectedCard).name}」的目标`
+                      : "你的行动 · 选择一张手牌"
+                    : `${active?.displayName}的行动`}
           </p>
           <span className="round-counter">
             {overheatAmount > 0 ? `过载 ${overheatAmount}` : `轮次 ${state.roundNumber}`}
@@ -220,7 +229,7 @@ export function EmberPactGame({ onExit }: GameRuntimeProps) {
         <div className="hand-dock__header">
           <span>
             <small>你的手牌</small>
-            <strong>{isHumanTurn ? "选牌，再点选目标" : "等待其他角色行动"}</strong>
+            <strong>{!setupComplete ? "先在战术炉谱里选择出战角色" : isHumanTurn ? "选牌，再点选目标" : "等待其他角色行动"}</strong>
           </span>
           <button type="button" className="pass-button" onClick={handlePass} disabled={!isHumanTurn}>
             暂缓行动
@@ -247,7 +256,8 @@ export function EmberPactGame({ onExit }: GameRuntimeProps) {
           selectedId={chosenId}
           selectionLocked={setupComplete}
           onSelect={chooseCombatant}
-          onClose={closeBrief}
+          onCommit={commitBrief}
+          onClose={dismissBrief}
         />
       )}
 

@@ -63,15 +63,18 @@ export function TwentyOneGame({ onExit }: GameRuntimeProps) {
 
     const expectedRevision = state.revision;
     const timer = window.setTimeout(() => {
+      // 若这一步直接结账，落定音效由 settled effect 统一播放，
+      // 这里只负责取牌过程中的提示音，避免双重 tap。
+      const settlesNow = dealerStep(state).phase === "settled";
       setState((current) => {
         if (current.phase !== "dealer-turn" || current.revision !== expectedRevision) return current;
         return dealerStep(current);
       });
-      playSound(dealerValue.total < 17 ? "card" : "tap");
+      if (!settlesNow) playSound(dealerValue.total < 17 ? "card" : "tap");
     }, 760);
 
     return () => window.clearTimeout(timer);
-  }, [dealerThinking, dealerValue.total, playSound, state.revision]);
+  }, [dealerThinking, dealerValue.total, playSound, state, state.revision]);
 
   useEffect(() => {
     if (state.phase === "settled") playSound(state.outcome === "player" ? "win" : "tap");

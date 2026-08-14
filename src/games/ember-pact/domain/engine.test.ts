@@ -125,6 +125,28 @@ describe("Ember Pact engine", () => {
     expect(hasStatus(getCombatant(secondTick, "scar")!, "burning")).toBe(false);
   });
 
+  it("keeps an untimed burn alight until it is cleansed", () => {
+    const initial = updateActor(createInitialState(fixedRandom), "player", {
+      statuses: [{ id: "burning" }],
+    });
+    const firstTick = passTurn(initial, "player");
+    expect(getCombatant(firstTick, "player")?.hp).toBe(22);
+    expect(hasStatus(getCombatant(firstTick, "player")!, "burning")).toBe(true);
+
+    // 没有剩余回合的灼烧与「破绽」「蓄势」一样是永久的，不会自己熄灭。
+    const laterTick = passTurn({ ...firstTick, activePlayerId: "player" }, "player");
+    expect(hasStatus(getCombatant(laterTick, "player")!, "burning")).toBe(true);
+  });
+
+  it("renews a burn when cinder lands on an already burning target", () => {
+    const weakened = updateActor(createInitialState(fixedRandom), "scar", {
+      statuses: [{ id: "burning", remainingTurns: 1 }],
+    });
+    const cinder = giveCard(weakened, "player", "cinder");
+    const renewed = playCard(cinder.state, "player", cinder.card.uid, "scar");
+    expect(getCombatant(renewed, "scar")?.statuses.find((status) => status.id === "burning")?.remainingTurns).toBe(2);
+  });
+
   it("triggers Furnace Heart and Afterglow passives", () => {
     const plate = giveCard(createInitialState(fixedRandom), "player", "plate");
     const guarded = playCard(plate.state, "player", plate.card.uid, "player");

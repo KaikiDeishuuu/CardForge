@@ -24,7 +24,10 @@ export default tseslint.config(
     plugins: { "react-refresh": reactRefresh },
     rules: {
       "react-hooks/exhaustive-deps": "error",
-      "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
+      "react-refresh/only-export-components": [
+        "warn",
+        { allowConstantExport: true, allowExportNames: ["useSound"] },
+      ],
     },
   },
   {

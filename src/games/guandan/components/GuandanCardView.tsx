@@ -15,7 +15,6 @@ interface GuandanCardViewProps {
   selected?: boolean;
   selectable?: boolean;
   compact?: boolean;
-  hidden?: boolean;
   onSelect?: (id: string) => void;
 }
 
@@ -25,7 +24,6 @@ export function GuandanCardView({
   selected = false,
   selectable = false,
   compact = false,
-  hidden = false,
   onSelect,
 }: GuandanCardViewProps) {
   const wild = isWild(card, levelRank);
@@ -37,7 +35,6 @@ export function GuandanCardView({
     `gd-card--${card.rank}`,
     selected ? "is-selected" : "",
     compact ? "is-compact" : "",
-    hidden ? "is-hidden" : "",
     wild ? "is-wild" : "",
   ].filter(Boolean).join(" ");
 
@@ -50,14 +47,14 @@ export function GuandanCardView({
         aria-pressed={selected}
         aria-label={`${card.name}${wild ? "，百搭级牌" : ""}`}
       >
-        <CardFace rank={rank} symbol={symbol} wild={wild} hidden={hidden} deckIndex={card.deckIndex} />
+        <CardFace rank={rank} symbol={symbol} wild={wild} deckIndex={card.deckIndex} />
       </button>
     );
   }
 
   return (
-    <span className={className} role="img" aria-label={hidden ? "未公开手牌" : card.name}>
-      <CardFace rank={rank} symbol={symbol} wild={wild} hidden={hidden} deckIndex={card.deckIndex} />
+    <span className={className} role="img" aria-label={card.name}>
+      <CardFace rank={rank} symbol={symbol} wild={wild} deckIndex={card.deckIndex} />
     </span>
   );
 }
@@ -66,18 +63,13 @@ function CardFace({
   rank,
   symbol,
   wild,
-  hidden,
   deckIndex,
 }: {
   rank: string;
   symbol: string;
   wild: boolean;
-  hidden: boolean;
   deckIndex: 0 | 1;
 }) {
-  if (hidden) {
-    return <><span className="gd-card__weave" aria-hidden="true">贯</span><i className="gd-card__deck-dot" /></>;
-  }
   return (
     <>
       <span className="gd-card__rank">{rank}</span>
