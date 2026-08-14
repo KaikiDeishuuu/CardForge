@@ -99,7 +99,7 @@ function settle(
   text: string,
   returnRate: number,
 ): TwentyOneState {
-  const returned = Math.floor(state.bet * returnRate);
+  const returned = state.bet * returnRate;
   const nextEvent = event(state.revision + 1, "table", "settle", text);
   return appendEvent({
     ...state,
@@ -147,7 +147,7 @@ export function placeBet(
   amount: number,
   random: () => number = Math.random,
 ): TwentyOneState {
-  if (state.phase !== "betting" || amount <= 0 || amount > state.chips) return state;
+  if (state.phase !== "betting" || !BET_STEPS.includes(amount) || amount > state.chips) return state;
 
   let deck: readonly PlayingCard[] = state.deck.length < RESHUFFLE_BELOW
     ? shuffled(createDeck(), random)

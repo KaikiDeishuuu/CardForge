@@ -337,9 +337,13 @@ export function GuandanGame({ onExit }: GameRuntimeProps) {
             </h2>
 
             <div className="gd-level-gain">
-              <span><small>{teamName(dealResult.winner)}</small><b>{dealResult.fromLevel}</b></span>
-              <i aria-hidden="true">→</i>
-              <span className="is-target"><small>升 {dealResult.gained} 级</small><b>{dealResult.toLevel}</b></span>
+              {champion
+                ? <span className="is-target"><small>{teamName(dealResult.winner)}</small><b>打过 A</b></span>
+                : <>
+                    <span><small>{teamName(dealResult.winner)}</small><b>{dealResult.fromLevel}</b></span>
+                    <i aria-hidden="true">→</i>
+                    <span className="is-target"><small>升 {dealResult.gained} 级</small><b>{dealResult.toLevel}</b></span>
+                  </>}
             </div>
 
             <p>

@@ -84,6 +84,27 @@ test("烬契可以改选出战角色并翻转敌我两行", async ({ page }, tes
   assertNoPageErrors();
 });
 
+test("烬契开局后战术炉谱不会重置对局", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "对局锁定与视口无关，只在一个桌面项目验证");
+  const assertNoPageErrors = collectPageErrors(page);
+  await page.goto("/?game=ember-pact");
+  await page.getByRole("button", { name: /点亮熔炉/ }).click();
+
+  const hand = page.getByRole("list", { name: "你的手牌" });
+  await hand.getByRole("button").first().click();
+  await page.getByRole("button", { name: /可选为目标/ }).first().click();
+  await expect(hand.getByRole("button")).toHaveCount(3);
+
+  await page.getByRole("button", { name: "打开战术炉谱" }).click();
+  const dialog = page.getByRole("dialog", { name: /先看炉火/ });
+  await expect(dialog.getByRole("radio", { name: /铸痕/ })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: "返回战场" })).toBeFocused();
+  await dialog.getByRole("button", { name: "返回战场" }).click();
+
+  await expect(hand.getByRole("button")).toHaveCount(3);
+  assertNoPageErrors();
+});
+
 test("二十一刻可以下注、要牌并结算到下一手", async ({ page }) => {
   const assertNoPageErrors = collectPageErrors(page);
   await page.goto("/?game=twenty-one");

@@ -6,11 +6,12 @@ import { useModalFocus } from "../../../shared/ui/useModalFocus";
 interface TacticalBriefProps {
   combatants: readonly Combatant[];
   selectedId: string;
+  selectionLocked: boolean;
   onSelect: (id: string) => void;
   onClose: () => void;
 }
 
-export function TacticalBrief({ combatants, selectedId, onSelect, onClose }: TacticalBriefProps) {
+export function TacticalBrief({ combatants, selectedId, selectionLocked, onSelect, onClose }: TacticalBriefProps) {
   const modalRef = useModalFocus({ active: true, initialFocus: ".ledger-enter", onDismiss: onClose });
   const chosen = combatants.find((combatant) => combatant.id === selectedId);
 
@@ -31,8 +32,12 @@ export function TacticalBrief({ combatants, selectedId, onSelect, onClose }: Tac
         </p>
 
         <div className="ledger-section">
-          <h3>选择出战角色</h3>
-          <div className="passive-grid" role="radiogroup" aria-label="选择出战角色">
+          <h3>{selectionLocked ? "本局出战角色" : "选择出战角色"}</h3>
+          <div
+            className="passive-grid"
+            role="radiogroup"
+            aria-label={selectionLocked ? "本局出战角色，对局中不可更换" : "选择出战角色"}
+          >
             {combatants.map((combatant) => {
               const passive = PASSIVE_CATALOG[combatant.passiveId];
               const isChosen = combatant.id === selectedId;
@@ -43,6 +48,7 @@ export function TacticalBrief({ combatants, selectedId, onSelect, onClose }: Tac
                   role="radio"
                   aria-checked={isChosen}
                   className={`passive-note team-${combatant.team} ${isChosen ? "is-chosen" : ""}`}
+                  disabled={selectionLocked}
                   onClick={() => onSelect(combatant.id)}
                 >
                   <span>{combatant.monogram}</span>
@@ -51,7 +57,7 @@ export function TacticalBrief({ combatants, selectedId, onSelect, onClose }: Tac
                     <strong>{passive.name}</strong>
                     <p>{passive.description}</p>
                   </div>
-                  {isChosen && <b className="passive-note__pick">出战</b>}
+                  {isChosen && <b className="passive-note__pick">{selectionLocked ? "本局出战" : "出战"}</b>}
                 </button>
               );
             })}
@@ -77,7 +83,9 @@ export function TacticalBrief({ combatants, selectedId, onSelect, onClose }: Tac
         </div>
 
         <button type="button" className="ledger-enter" onClick={onClose}>
-          以{chosen?.displayName ?? "晨铸先锋"}的身份点亮熔炉
+          {selectionLocked
+            ? "返回战场"
+            : `以${chosen?.displayName ?? "晨铸先锋"}的身份点亮熔炉`}
         </button>
       </section>
     </div>

@@ -33,6 +33,7 @@ export function EmberPactGame({ onExit }: GameRuntimeProps) {
   const [selectedUid, setSelectedUid] = useState<string>();
   const [showLog, setShowLog] = useState(false);
   const [showBrief, setShowBrief] = useState(true);
+  const [setupComplete, setSetupComplete] = useState(false);
   const [inspectedId, setInspectedId] = useState<string>();
   const { enabled: soundEnabled, toggle: toggleSound, play: playSound } = useSound();
 
@@ -96,11 +97,16 @@ export function EmberPactGame({ onExit }: GameRuntimeProps) {
 
   /** 选将只在开局炉谱里可用，直接按新角色重新发牌。 */
   function chooseCombatant(id: string) {
-    if (!showBrief || id === chosenId) return;
+    if (setupComplete || !showBrief || id === chosenId) return;
     setChosenId(id);
     setSelectedUid(undefined);
     setState(createInitialState(Math.random, id));
     playSound("tap");
+  }
+
+  function closeBrief() {
+    setSetupComplete(true);
+    setShowBrief(false);
   }
 
   function restart() {
@@ -239,8 +245,9 @@ export function EmberPactGame({ onExit }: GameRuntimeProps) {
         <TacticalBrief
           combatants={state.combatants}
           selectedId={chosenId}
+          selectionLocked={setupComplete}
           onSelect={chooseCombatant}
-          onClose={() => setShowBrief(false)}
+          onClose={closeBrief}
         />
       )}
 

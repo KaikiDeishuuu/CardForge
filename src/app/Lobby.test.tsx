@@ -55,6 +55,16 @@ describe("Lobby", () => {
     expect(container.querySelector(".featured-game")?.textContent).toContain("first-playable 牌桌");
   });
 
+  it("derives the playable table count from launchable registrations", () => {
+    const { getByText } = renderLobby([
+      registration("first-playable"),
+      registration("planned-table", { availability: "planned" }),
+      registration("second-playable"),
+    ]);
+
+    expect(getByText("2 套独立规则可游玩")).toBeTruthy();
+  });
+
   it("renders a lobby with no featured table instead of throwing", () => {
     const { container } = renderLobby([
       registration("planned-one", { availability: "planned" }),

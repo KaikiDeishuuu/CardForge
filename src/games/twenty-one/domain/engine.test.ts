@@ -69,6 +69,7 @@ describe("Twenty One engine", () => {
   it("refuses a bet outside the betting phase or beyond the stack", () => {
     const initial = createInitialState(() => 0.37);
     expect(placeBet(initial, 0)).toBe(initial);
+    expect(placeBet(initial, 37)).toBe(initial);
     expect(placeBet(initial, STARTING_CHIPS + 10)).toBe(initial);
     expect(placeBet(placeBet(initial, 25), 25).bet).toBe(25);
     expect(availableBets({ ...initial, chips: 30 })).toEqual([10, 25]);
@@ -76,14 +77,14 @@ describe("Twenty One engine", () => {
 
   it("pays a natural blackjack at three to two", () => {
     const shoe = stackedDeck(card("A"), card("10", "clubs"), card("K"), card("6", "diamonds"));
-    const settled = placeBet({ ...createInitialState(() => 0.5), deck: shoe, chips: 200 }, 50);
+    const settled = placeBet({ ...createInitialState(() => 0.5), deck: shoe, chips: 200 }, 25);
 
     expect(settled.phase).toBe("settled");
     expect(settled.outcome).toBe("player");
     expect(settled.reason).toBe("Blackjack");
-    // 200 - 50 押注，再连本带利退回 125（50 × 2.5）。
-    expect(settled.chips).toBe(275);
-    expect(settled.payout).toBe(75);
+    // 200 - 25 押注，再连本带利退回 62.5（25 × 2.5）。
+    expect(settled.chips).toBe(237.5);
+    expect(settled.payout).toBe(37.5);
   });
 
   it("returns the stake on a push and keeps it on a loss", () => {

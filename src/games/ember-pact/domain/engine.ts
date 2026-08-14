@@ -38,17 +38,26 @@ function shuffled<T>(items: readonly T[], random: () => number): T[] {
 
 // Reshuffling happens mid-match, deep inside turn advancement, so the engine
 // carries a seed in state instead of threading a random callback through every
-// entry point. Actions stay pure functions of the state they receive.
-function advanceSeed(seed: number): number {
-  return (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+// entry point. Mulberry32 keeps every operation in exact 32-bit arithmetic,
+// leaving actions as pure functions of the state they receive.
+function nextRandom(seed: number): { seed: number; sample: number } {
+  const nextSeed = (seed + 0x6d2b79f5) >>> 0;
+  let value = nextSeed;
+  value = Math.imul(value ^ (value >>> 15), value | 1);
+  value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+  return {
+    seed: nextSeed,
+    sample: ((value ^ (value >>> 14)) >>> 0) / 4_294_967_296,
+  };
 }
 
 function reshuffle<T>(items: readonly T[], seed: number): { items: T[]; seed: number } {
   const result = [...items];
   let current = seed;
   for (let index = result.length - 1; index > 0; index -= 1) {
-    current = advanceSeed(current);
-    const swapIndex = current % (index + 1);
+    const random = nextRandom(current);
+    current = random.seed;
+    const swapIndex = Math.floor(random.sample * (index + 1));
     [result[index], result[swapIndex]] = [result[swapIndex], result[index]];
   }
   return { items: result, seed: current };

@@ -13,6 +13,7 @@ function isLaunchable(game: GameRegistration): boolean {
 }
 
 export function Lobby({ games, soundEnabled, onToggleSound, onLaunch }: LobbyProps) {
+  const launchableCount = games.filter(isLaunchable).length;
   const featured = games.find((game) => game.manifest.featured && isLaunchable(game))
     ?? games.find(isLaunchable);
   const shelfGames = featured
@@ -46,7 +47,7 @@ export function Lobby({ games, soundEnabled, onToggleSound, onLaunch }: LobbyPro
             CardForge 是为不同卡牌规则准备的游戏平台。每个游戏独立生长，共用可靠的牌桌、交互与基础能力。
           </p>
           <dl className="platform-notes">
-            <div><dt>现有牌桌</dt><dd>三套独立规则可游玩</dd></div>
+            <div><dt>现有牌桌</dt><dd>{launchableCount} 套独立规则可游玩</dd></div>
             <div><dt>设备方向</dt><dd>手机竖屏优先</dd></div>
             <div><dt>当前版本</dt><dd>可完整开始与结束</dd></div>
           </dl>

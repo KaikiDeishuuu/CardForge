@@ -221,6 +221,8 @@ describe("Ember Pact engine", () => {
     expect([...order].sort()).toEqual(pile.map((card) => card.uid).sort());
     expect(order, "must not simply replay the discard pile backwards")
       .not.toEqual([...pile].reverse().map((card) => card.uid));
+    expect(order, "the same seed must reproduce the exact shuffle")
+      .toEqual(recycledOrder(7));
     expect(order, "a different seed must produce a different shuffle")
       .not.toEqual(recycledOrder(99));
   });
