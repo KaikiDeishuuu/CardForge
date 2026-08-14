@@ -1087,3 +1087,154 @@ button.gd-card:focus-visible {
     animation: none;
   }
 }
+
+@media (min-width: 1000px) {
+  .guandan-topbar {
+    min-height: 66px;
+    padding-inline: max(28px, calc((100vw - 1280px) / 2));
+  }
+
+  .gd-level-rail {
+    padding-inline: max(34px, calc((100vw - 1280px) / 2));
+  }
+
+  .gd-arena {
+    width: min(100% - 64px, 1180px);
+  }
+
+  .gd-arena::before {
+    inset-inline: 0;
+  }
+
+  .gd-seat {
+    min-width: 138px;
+    min-height: 54px;
+    padding: 9px 11px;
+  }
+
+  .gd-seat--partner {
+    top: 14px;
+    width: 178px;
+  }
+
+  .gd-seat--east {
+    top: 108px;
+    right: 24px;
+  }
+
+  .gd-seat--west {
+    top: 108px;
+    left: 24px;
+  }
+
+  .gd-seat__avatar {
+    width: 36px;
+    height: 36px;
+    font-size: 16px;
+  }
+
+  .gd-seat__copy strong {
+    font-size: 14px;
+  }
+
+  .gd-seat__count {
+    font-size: 19px;
+  }
+
+  .gd-trick {
+    width: min(48%, 430px);
+    min-height: 184px;
+    padding: 16px 21px 13px;
+  }
+
+  .gd-trick header strong {
+    font-size: 18px;
+  }
+
+  .gd-trick__cards {
+    min-height: 94px;
+  }
+
+  .gd-card.is-compact {
+    width: 45px;
+    height: 63px;
+  }
+
+  .gd-turn-flag {
+    right: 26px;
+    bottom: 18px;
+    font-size: 8px;
+  }
+
+  .gd-hand-dock {
+    padding-inline: max(28px, calc((100vw - 1180px) / 2));
+  }
+
+  .gd-hand-heading,
+  .gd-hand-rows {
+    width: min(100%, 1180px);
+  }
+
+  .gd-hand-heading strong {
+    font-size: 16px;
+  }
+
+  .gd-selection-status {
+    font-size: 9px;
+  }
+}
+
+@media (min-width: 1200px) {
+  .gd-hand-dock {
+    min-height: 182px;
+    padding-top: 8px;
+  }
+
+  .gd-hand-rows {
+    height: 80px;
+    margin-block: 3px 5px;
+    display: flex;
+    align-items: end;
+    justify-content: center;
+    overflow: visible;
+  }
+
+  .gd-hand-row {
+    min-width: 0;
+    flex: 0 0 auto;
+    justify-self: auto;
+  }
+
+  .gd-hand-row + .gd-hand-row {
+    margin-left: -14px;
+  }
+
+  .gd-hand-row .gd-card + .gd-card {
+    margin-left: -14px;
+  }
+
+  .gd-card {
+    width: 52px;
+    height: 72px;
+  }
+
+  .gd-card__rank {
+    top: 5px;
+    left: 6px;
+    font-size: 17px;
+  }
+
+  .gd-card__suit {
+    top: 23px;
+    left: 7px;
+    font-size: 12px;
+  }
+
+  .gd-actions {
+    width: min(100%, 650px);
+  }
+
+  .gd-action {
+    min-height: 42px;
+  }
+}

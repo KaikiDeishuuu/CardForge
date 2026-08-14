@@ -927,3 +927,39 @@ a:focus-visible {
     transition-duration: 0.01ms !important;
   }
 }
+
+@media (min-width: 1100px) {
+  .lobby-header,
+  .lobby-hero,
+  .game-shelf,
+  .lobby-footer {
+    width: min(1280px, calc(100% - 64px));
+  }
+
+  .lobby-header {
+    min-height: 86px;
+  }
+
+  .lobby-hero {
+    min-height: 610px;
+    padding: 46px 0 66px;
+    grid-template-columns: minmax(0, 1fr) minmax(390px, 0.62fr);
+    gap: clamp(72px, 9vw, 140px);
+  }
+
+  .hero-copy h1 {
+    font-size: clamp(78px, 6.8vw, 104px);
+  }
+
+  .featured-game {
+    width: min(100%, 400px);
+  }
+
+  .game-shelf {
+    padding: 62px 0 84px;
+  }
+
+  .planned-game {
+    min-height: 288px;
+  }
+}

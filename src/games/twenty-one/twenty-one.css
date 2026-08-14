@@ -879,3 +879,159 @@
   .twenty-one-modal,
   .outcome-ticket { animation: none; }
 }
+
+@media (min-width: 900px) {
+  .twenty-one-topbar {
+    min-height: 72px;
+    padding-inline: max(28px, calc((100vw - 1180px) / 2));
+  }
+
+  .twenty-one-table {
+    width: min(100% - 80px, 1080px);
+    padding: 22px 54px 18px;
+  }
+
+  .twenty-one-table::before {
+    inset-inline: 0;
+  }
+
+  .dealer-zone,
+  .player-zone {
+    min-height: 154px;
+  }
+
+  .hand-heading {
+    min-height: 34px;
+  }
+
+  .hand-heading strong {
+    font-size: 16px;
+  }
+
+  .hand-heading__score {
+    font-size: 14px;
+  }
+
+  .playing-hand {
+    height: 158px;
+    padding-top: 12px;
+  }
+
+  .tw-card {
+    width: 110px;
+    border-radius: 9px;
+  }
+
+  .tw-card + .tw-card {
+    margin-left: -22px;
+  }
+
+  .table-center {
+    min-height: 220px;
+  }
+
+  .score-dial {
+    width: 190px;
+  }
+
+  .deck-stack {
+    left: 18px;
+    width: 48px;
+    height: 66px;
+  }
+
+  .table-status {
+    right: 14px;
+    width: 220px;
+  }
+
+  .table-status p {
+    font-size: 12px;
+  }
+
+  .decision-dock {
+    min-height: 120px;
+  }
+
+  .decision-dock__copy {
+    width: 300px;
+  }
+
+  .decision-dock__copy strong {
+    font-size: 17px;
+  }
+
+  .decision-button {
+    width: 178px;
+    min-height: 70px;
+  }
+}
+
+@media (min-width: 900px) and (max-height: 820px) {
+  .twenty-one-topbar {
+    min-height: 64px;
+  }
+
+  .twenty-one-table {
+    padding: 12px 54px 10px;
+    grid-template-rows: auto minmax(150px, 1fr) auto;
+    gap: 4px;
+  }
+
+  .dealer-zone,
+  .player-zone {
+    min-height: 130px;
+  }
+
+  .hand-heading {
+    min-height: 30px;
+  }
+
+  .playing-hand {
+    height: 122px;
+    padding-top: 7px;
+  }
+
+  .tw-card {
+    width: 84px;
+  }
+
+  .tw-card + .tw-card {
+    margin-left: -18px;
+  }
+
+  .table-center {
+    min-height: 150px;
+  }
+
+  .score-dial {
+    width: 140px;
+  }
+
+  .deck-stack {
+    width: 42px;
+    height: 58px;
+  }
+
+  .table-status {
+    width: 200px;
+  }
+
+  .table-status p {
+    font-size: 11px;
+  }
+
+  .decision-dock {
+    min-height: 100px;
+    padding-block: 10px;
+  }
+
+  .decision-dock__copy strong {
+    font-size: 15px;
+  }
+
+  .decision-button {
+    width: 160px;
+    min-height: 58px;
+  }
+}

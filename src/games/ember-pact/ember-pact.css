@@ -1192,3 +1192,102 @@
     margin-block: 5px 3px;
   }
 }
+
+@media (min-width: 1000px) {
+  .battle-topbar {
+    width: min(100% - 64px, 1180px);
+    min-height: 64px;
+  }
+
+  .battlefield {
+    width: min(100% - 64px, 1180px);
+    padding: 14px 0 18px;
+    gap: 10px;
+  }
+
+  .seat-row {
+    gap: 18px;
+  }
+
+  .player-seat {
+    min-height: 122px;
+    padding: 15px 20px;
+    gap: 15px;
+  }
+
+  .player-seat__portrait {
+    width: 68px;
+    height: 82px;
+    flex-basis: 68px;
+  }
+
+  .player-seat__portrait::before {
+    width: 52px;
+    height: 52px;
+  }
+
+  .player-seat__portrait span {
+    font-size: 28px;
+  }
+
+  .player-seat__identity strong {
+    font-size: 19px;
+  }
+
+  .player-seat__identity small,
+  .health-row b {
+    font-size: 10px;
+  }
+
+  .player-seat__meta {
+    font-size: 9px;
+  }
+
+  .player-seat__statuses i {
+    width: 21px;
+    height: 21px;
+    font-size: 10px;
+  }
+
+  .forge-line p {
+    min-width: 250px;
+    padding-inline: 22px;
+    font-size: 10px;
+  }
+
+  .hand-dock {
+    padding: 14px max(32px, calc((100vw - 1180px) / 2)) max(14px, env(safe-area-inset-bottom));
+  }
+
+  .hand-dock__header {
+    max-width: 1180px;
+    margin-bottom: 11px;
+  }
+
+  .hand-dock__header strong {
+    font-size: 11px;
+  }
+
+  .player-hand {
+    max-width: 960px;
+    margin-inline: auto;
+    gap: 12px;
+  }
+
+  .card-frame {
+    width: 132px;
+    height: 176px;
+    flex-basis: 132px;
+    padding: 12px;
+  }
+
+  .card-frame__symbol {
+    width: 58px;
+    height: 58px;
+    font-size: 31px;
+  }
+
+  .card-frame__title {
+    font-size: 18px;
+  }
+}
