@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { chooseAiMove, chooseBestMove } from "./ai";
 import {
+  DEFAULT_HUMAN_ID,
   HAND_LIMIT,
   createInitialState,
+  selectableCombatantIds,
   getCombatant,
   getValidTargetIds,
   hasStatus,
@@ -42,6 +44,42 @@ describe("Ember Pact engine", () => {
     expect(state.combatants.map((actor) => actor.maxHp)).toEqual([24, 20, 25, 21]);
     expect(new Set(state.combatants.map((actor) => actor.passiveId)).size).toBe(4);
     expect(state.roundNumber).toBe(1);
+  });
+
+  it("seats the human on any chosen combatant and leaves the rest to the AI", () => {
+    const asScar = createInitialState(fixedRandom, "scar");
+    expect(getCombatant(asScar, "scar")?.controller).toBe("human");
+    expect(getCombatant(asScar, "player")?.controller).toBe("ai");
+    expect(asScar.combatants.filter((actor) => actor.controller === "human")).toHaveLength(1);
+    expect(getCombatant(asScar, "scar")?.team).toBe("dusk");
+
+    const fallback = createInitialState(fixedRandom, "nobody");
+    expect(getCombatant(fallback, DEFAULT_HUMAN_ID)?.controller).toBe("human");
+    expect(selectableCombatantIds()).toEqual(["player", "luna", "scar", "ember"]);
+  });
+
+  it("drains with siphon and shields with aegis", () => {
+    const drained = updateActor(createInitialState(fixedRandom), "player", { hp: 18 });
+    const siphon = giveCard(drained, "player", "siphon");
+    const drain = playCard(siphon.state, "player", siphon.card.uid, "scar");
+    expect(getCombatant(drain, "scar")?.hp).toBe(22);
+    expect(getCombatant(drain, "player")?.hp).toBe(20);
+
+    // 护盾在目标下一次行动开始时清空，所以挡在自己身上才留得住。
+    const exposed = updateActor(createInitialState(fixedRandom), "player", { statuses: [{ id: "exposed" }] });
+    const aegis = giveCard(exposed, "player", "aegis");
+    const shielded = playCard(aegis.state, "player", aegis.card.uid, "player");
+    expect(getCombatant(shielded, "player")?.block).toBe(4);
+    expect(hasStatus(getCombatant(shielded, "player")!, "exposed")).toBe(false);
+  });
+
+  it("lights a single-turn burn with emberwind", () => {
+    const emberTurn = { ...createInitialState(fixedRandom), activePlayerId: "ember" };
+    const wind = giveCard(emberTurn, "ember", "emberwind");
+    const burned = playCard(wind.state, "ember", wind.card.uid, "player");
+
+    expect(getCombatant(burned, "player")?.hp).toBe(22);
+    expect(getCombatant(burned, "player")?.statuses.find((status) => status.id === "burning")?.remainingTurns).toBe(1);
   });
 
   it("validates enemy, ally and self target rules", () => {

@@ -111,13 +111,25 @@ function dealOpeningHand(combatant: Combatant, seed: number): { combatant: Comba
   return { combatant: result, seed: current };
 }
 
-export function createInitialState(random: () => number = Math.random): EmberPactState {
+export const DEFAULT_HUMAN_ID = "player";
+
+/** 可选出战角色：四人任选其一，其余交给 AI，阵营随所选角色确定。 */
+export function selectableCombatantIds(): readonly string[] {
+  return COMBATANT_SEEDS.map((seed) => seed.id);
+}
+
+export function createInitialState(
+  random: () => number = Math.random,
+  humanId: string = DEFAULT_HUMAN_ID,
+): EmberPactState {
   let rngSeed = Math.floor(random() * 2_147_483_647) || 1;
   const combatants: Combatant[] = [];
+  const controlled = COMBATANT_SEEDS.some((seed) => seed.id === humanId) ? humanId : DEFAULT_HUMAN_ID;
 
   for (const seed of COMBATANT_SEEDS) {
     const dealt = dealOpeningHand({
       ...seed,
+      controller: seed.id === controlled ? "human" : "ai",
       hp: seed.maxHp,
       block: 0,
       statuses: [],

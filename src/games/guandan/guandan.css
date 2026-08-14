@@ -142,6 +142,85 @@
   transform: translateY(-1px);
 }
 
+.gd-match-score {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gd-match-score__team {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  color: #f4e7c8;
+  background: rgba(33, 64, 73, 0.55);
+  opacity: 0.72;
+}
+
+.gd-match-score__team--vermillion { background: rgba(179, 58, 55, 0.78); }
+.gd-match-score__team--indigo { background: rgba(43, 103, 115, 0.82); }
+
+.gd-match-score__team.is-attacking {
+  opacity: 1;
+  box-shadow: 0 0 0 1.5px #f0d79a;
+}
+
+/* Overrides the rank-strip cell styling that would otherwise inherit here. */
+.gd-match-score__team i {
+  height: auto;
+  display: inline;
+  font-family: Georgia, serif;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.gd-level-gain {
+  margin-top: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(12px, 4vw, 22px);
+}
+
+.gd-level-gain span {
+  min-width: 74px;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid rgba(29, 65, 65, 0.24);
+  border-radius: 4px;
+}
+
+.gd-level-gain small {
+  font-family: var(--utility);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.09em;
+  opacity: 0.72;
+}
+
+.gd-level-gain b {
+  font-family: Georgia, serif;
+  font-size: 26px;
+  line-height: 1;
+}
+
+.gd-level-gain i {
+  font-style: normal;
+  font-size: 16px;
+  opacity: 0.5;
+}
+
+.gd-level-gain .is-target {
+  color: #f6ecd4;
+  background: var(--gd-vermilion);
+  border-color: #8f2f2c;
+}
+
 .gd-arena {
   position: relative;
   width: min(100%, 920px);

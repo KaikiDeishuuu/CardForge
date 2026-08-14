@@ -38,7 +38,7 @@ test("大厅展示三张独立牌桌且不会横向溢出", async ({ page }) => 
 
   await expect(page.getByRole("button", { name: /烬契/ })).toBeEnabled();
   await expect(page.getByRole("button", { name: /二十一刻/ })).toBeEnabled();
-  await expect(page.getByRole("button", { name: /掼蛋 · 入门局/ })).toBeEnabled();
+  await expect(page.getByRole("button", { name: /掼蛋/ })).toBeEnabled();
   await expect(page.locator(".featured-game, .planned-game.is-playable")).toHaveCount(3);
   await expectNoDocumentOverflow(page);
   assertNoPageErrors();
@@ -65,23 +65,48 @@ test("烬契规则弹层、选牌和目标选择可以完成", async ({ page }) 
   assertNoPageErrors();
 });
 
-test("二十一刻可以关闭规则并要一张牌", async ({ page }) => {
+test("烬契可以改选出战角色并翻转敌我两行", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "选将与视口无关，只在一个桌面项目验证");
+  const assertNoPageErrors = collectPageErrors(page);
+  await page.goto("/?game=ember-pact");
+
+  const dialog = page.getByRole("dialog", { name: /先看炉火/ });
+  await expect(page.locator(".team-label--ally span")).toHaveCount(0);
+
+  const scar = dialog.getByRole("radio", { name: /铸痕/ });
+  await scar.click();
+  await expect(scar).toHaveAttribute("aria-checked", "true");
+  await dialog.getByRole("button", { name: /点亮熔炉/ }).click();
+
+  // 铸痕属夜蚀来客，所以己方那一行应当变成夜蚀。
+  await expect(page.locator(".team-label--ally span")).toHaveText("夜蚀来客");
+  await expect(page.locator(".team-label--enemy span")).toHaveText("晨铸同盟");
+  assertNoPageErrors();
+});
+
+test("二十一刻可以下注、要牌并结算到下一手", async ({ page }) => {
   const assertNoPageErrors = collectPageErrors(page);
   await page.goto("/?game=twenty-one");
 
-  let entry = page.getByRole("button", { name: /开始判断/ });
+  const entry = page.getByRole("button", { name: /开始判断/ });
   await expect(entry).toBeFocused();
   await entry.click();
 
+  const chips = page.locator(".chip-stack b");
+  await expect(chips).toHaveText("500");
+
   const hit = page.getByRole("button", { name: /要牌/ });
-  for (let attempt = 0; attempt < 5 && await hit.isDisabled(); attempt += 1) {
-    await page.reload();
-    entry = page.getByRole("button", { name: /开始判断/ });
-    await entry.click();
+  const cards = page.locator(".playing-hand--player .tw-card");
+
+  // 押注后有可能直接 Blackjack 结算，那就开下一手再试。
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    await page.getByRole("button", { name: "压 25 枚筹码" }).click();
+    await expect(chips).toHaveText("475");
+    if (await hit.isEnabled()) break;
+    await page.getByRole("button", { name: /下一手/ }).click();
   }
 
   await expect(hit).toBeEnabled();
-  const cards = page.locator(".playing-hand--player .tw-card");
   const initialCount = await cards.count();
   await hit.click();
   await expect(cards).toHaveCount(initialCount + 1);
@@ -95,6 +120,10 @@ test("掼蛋支持键盘浏览、提示与出牌", async ({ page }) => {
   const entry = page.getByRole("button", { name: /入席开牌/ });
   await expect(entry).toBeFocused();
   await entry.click();
+
+  await expect(page.locator(".gd-level-rail > span")).toContainText("第 1 局");
+  await expect(page.locator(".gd-match-score__team--vermillion")).toContainText("2");
+  await expect(page.locator(".gd-match-score__team--indigo")).toContainText("2");
 
   const hand = page.getByRole("region", { name: "你的手牌" });
   const cards = hand.locator("button.gd-card");

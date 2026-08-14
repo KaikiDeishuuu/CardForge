@@ -1,15 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { chooseAiMove } from "./ai";
 import {
+  INITIAL_MATCH,
+  PLAYER_ORDER,
+  advanceLevel,
   canBeat,
   classifyCombo,
   createDeck,
   createInitialState,
   generateLegalCombos,
+  levelsForPartnerPlace,
   passTurn,
   playCards,
+  startNextDeal,
 } from "./engine";
-import type { CardRank, GuandanCard, GuandanPlayer, GuandanState, PlayerId, Suit } from "./types";
+import type { CardRank, GuandanCard, GuandanPlayer, GuandanState, MatchState, PlayerId, Suit } from "./types";
 
 let cardIndex = 0;
 function card(rank: CardRank, suit: Suit = "spades"): GuandanCard {
@@ -36,9 +41,21 @@ function state(players: readonly GuandanPlayer[], overrides: Partial<GuandanStat
     activePlayerId: "human",
     consecutivePasses: 0,
     finishOrder: [],
+    match: INITIAL_MATCH,
     log: [],
     ...overrides,
   };
+}
+
+/** 四家各持一张，按给定名次顺序依次走空，返回结算后的状态。 */
+function playOutDeal(order: readonly PlayerId[], match: MatchState = INITIAL_MATCH): GuandanState {
+  const hands = Object.fromEntries(PLAYER_ORDER.map((id) => [id, [card("3")]])) as Record<PlayerId, GuandanCard[]>;
+  let game = state(PLAYER_ORDER.map((id) => player(id, hands[id])), { match, activePlayerId: order[0] });
+  for (const id of order) {
+    if (game.status !== "playing") break;
+    game = playCards({ ...game, activePlayerId: id, trick: undefined }, id, [hands[id][0].id]);
+  }
+  return game;
 }
 
 describe("Guandan engine", () => {
@@ -161,6 +178,49 @@ describe("Guandan engine", () => {
     });
 
     expect(chooseAiMove(game, "partner")).toEqual({ kind: "pass" });
+  });
+
+  it("awards levels by the head player's partner place, not by who empties first", () => {
+    // 东座头游、西座末游：青岳方只升 1 级，即便朱雀两人先走空。
+    const result = playOutDeal(["east", "human", "partner"]);
+    expect(result.winner).toBe("indigo");
+    expect(result.match.lastResult).toMatchObject({ winner: "indigo", partnerPlace: 4, gained: 1 });
+    expect(result.match.levels.indigo).toBe("3");
+    expect(result.match.levels.vermillion).toBe("2");
+  });
+
+  it("gives three levels for a double win", () => {
+    const result = playOutDeal(["human", "partner"]);
+    expect(result.winner).toBe("vermillion");
+    expect(result.match.lastResult).toMatchObject({ partnerPlace: 2, gained: 3 });
+    expect(result.match.levels.vermillion).toBe("5");
+  });
+
+  it("maps every partner place to its level gain and caps below A", () => {
+    expect([2, 3, 4].map(levelsForPartnerPlace)).toEqual([3, 2, 1]);
+    expect(advanceLevel("2", 3)).toEqual({ level: "5", champion: false });
+    expect(advanceLevel("K", 3)).toEqual({ level: "A", champion: false });
+    expect(advanceLevel("A", 1)).toEqual({ level: "A", champion: true });
+  });
+
+  it("ends the match only by winning a deal at level A", () => {
+    const atAce: MatchState = { ...INITIAL_MATCH, levels: { vermillion: "A", indigo: "5" } };
+    const result = playOutDeal(["human", "partner"], atAce);
+    expect(result.match.champion).toBe("vermillion");
+    expect(startNextDeal(result, () => 0.4)).toBe(result);
+  });
+
+  it("starts the next deal on the new level with the head player leading", () => {
+    const finished = playOutDeal(["east", "west"]);
+    expect(finished.match.levels.indigo).toBe("5");
+
+    const next = startNextDeal(finished, () => 0.37);
+    expect(next.status).toBe("playing");
+    expect(next.levelRank).toBe("5");
+    expect(next.activePlayerId).toBe("east");
+    expect(next.match.dealNumber).toBe(2);
+    expect(next.players.every((entry) => entry.hand.length === 27)).toBe(true);
+    expect(next.players.every((entry) => entry.finishedPlace === undefined)).toBe(true);
   });
 
   it("can complete a deterministic four-seat game using only AI decisions", () => {

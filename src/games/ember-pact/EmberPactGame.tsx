@@ -8,6 +8,7 @@ import { CombatantSheet, TacticalBrief } from "./components/TacticalBrief";
 import { chooseAiMove } from "./domain/ai";
 import { TEAM_NAMES } from "./domain/data";
 import {
+  DEFAULT_HUMAN_ID,
   OVERHEAT_START_ROUND,
   createInitialState,
   getCard,
@@ -27,7 +28,8 @@ const cueForKind: Record<CardKind, "hit" | "card" | "heal"> = {
 };
 
 export function EmberPactGame({ onExit }: GameRuntimeProps) {
-  const [state, setState] = useState(createInitialState);
+  const [chosenId, setChosenId] = useState(DEFAULT_HUMAN_ID);
+  const [state, setState] = useState(() => createInitialState(Math.random, DEFAULT_HUMAN_ID));
   const [selectedUid, setSelectedUid] = useState<string>();
   const [showLog, setShowLog] = useState(false);
   const [showBrief, setShowBrief] = useState(true);
@@ -35,13 +37,14 @@ export function EmberPactGame({ onExit }: GameRuntimeProps) {
   const { enabled: soundEnabled, toggle: toggleSound, play: playSound } = useSound();
 
   const active = getCombatant(state, state.activePlayerId);
-  const player = getCombatant(state, "player")!;
+  // 出战角色由开局选将决定，敌我分组随之翻转，不再假设人类固定是 dawn。
+  const player = state.combatants.find((combatant) => combatant.controller === "human")!;
   const isHumanTurn = state.status === "playing" && active?.controller === "human";
   // Derived, not stored: a combatant is thinking exactly while its move is pending.
   const aiThinking = state.status === "playing" && active?.controller === "ai" && !showBrief && !inspectedId;
   const validTargetIds = useMemo(
-    () => selectedUid ? getValidTargetIds(state, "player", selectedUid) : [],
-    [selectedUid, state],
+    () => selectedUid ? getValidTargetIds(state, player.id, selectedUid) : [],
+    [player.id, selectedUid, state],
   );
 
   useEffect(() => {
@@ -81,13 +84,22 @@ export function EmberPactGame({ onExit }: GameRuntimeProps) {
     if (!selectedUid || !validTargetIds.includes(targetId)) return;
     const instance = player.hand.find((card) => card.uid === selectedUid);
     if (instance) playSound(cueForKind[getCard(instance).kind]);
-    setState((current) => playCard(current, "player", selectedUid, targetId));
+    setState((current) => playCard(current, player.id, selectedUid, targetId));
     setSelectedUid(undefined);
   }
 
   function handlePass() {
     setSelectedUid(undefined);
-    setState((current) => passTurn(current, "player"));
+    setState((current) => passTurn(current, player.id));
+    playSound("tap");
+  }
+
+  /** 选将只在开局炉谱里可用，直接按新角色重新发牌。 */
+  function chooseCombatant(id: string) {
+    if (!showBrief || id === chosenId) return;
+    setChosenId(id);
+    setSelectedUid(undefined);
+    setState(createInitialState(Math.random, id));
     playSound("tap");
   }
 
@@ -95,12 +107,13 @@ export function EmberPactGame({ onExit }: GameRuntimeProps) {
     setSelectedUid(undefined);
     setShowLog(false);
     setInspectedId(undefined);
-    setState(createInitialState());
+    setState(createInitialState(Math.random, chosenId));
     playSound("card");
   }
 
-  const enemies = state.combatants.filter((combatant) => combatant.team === "dusk");
-  const allies = state.combatants.filter((combatant) => combatant.team === "dawn");
+  const enemies = state.combatants.filter((combatant) => combatant.team !== player.team);
+  const allies = state.combatants.filter((combatant) => combatant.team === player.team);
+  const enemyTeam = enemies[0]?.team ?? (player.team === "dawn" ? "dusk" : "dawn");
   const selectedCard = selectedUid
     ? player.hand.find((card) => card.uid === selectedUid)
     : undefined;
@@ -138,7 +151,7 @@ export function EmberPactGame({ onExit }: GameRuntimeProps) {
 
       <section className="battlefield" aria-label="烬契战场">
         <div className="team-label team-label--enemy">
-          <span>夜蚀来客</span>
+          <span>{TEAM_NAMES[enemyTeam]}</span>
           <i />
         </div>
         <div className="seat-row seat-row--enemies">
@@ -193,7 +206,7 @@ export function EmberPactGame({ onExit }: GameRuntimeProps) {
         </div>
         <div className="team-label team-label--ally">
           <i />
-          <span>晨铸同盟</span>
+          <span>{TEAM_NAMES[player.team]}</span>
         </div>
       </section>
 
@@ -223,7 +236,12 @@ export function EmberPactGame({ onExit }: GameRuntimeProps) {
       )}
 
       {showBrief && (
-        <TacticalBrief combatants={state.combatants} onClose={() => setShowBrief(false)} />
+        <TacticalBrief
+          combatants={state.combatants}
+          selectedId={chosenId}
+          onSelect={chooseCombatant}
+          onClose={() => setShowBrief(false)}
+        />
       )}
 
       {inspected && (

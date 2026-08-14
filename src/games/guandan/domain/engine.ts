@@ -1,3 +1,4 @@
+import type { ControllerKind } from "../../../shared/types/game";
 import type {
   CardCombo,
   CardRank,
@@ -6,6 +7,7 @@ import type {
   GuandanCard,
   GuandanPlayer,
   GuandanState,
+  MatchState,
   NumberRank,
   PlayerId,
   Suit,
@@ -236,31 +238,80 @@ function appendAction(state: GuandanState, nextAction: GuandanAction): GuandanSt
   };
 }
 
-export function createInitialState(random: () => number = Math.random): GuandanState {
+export const INITIAL_MATCH: MatchState = {
+  levels: { vermillion: "2", indigo: "2" },
+  dealNumber: 1,
+  attackingTeam: "vermillion",
+};
+
+const SEATS: readonly { id: PlayerId; displayName: string; controller: ControllerKind; team: TeamId }[] = [
+  { id: "human", displayName: "你", controller: "human", team: "vermillion" },
+  { id: "east", displayName: "东座", controller: "ai", team: "indigo" },
+  { id: "partner", displayName: "对家", controller: "ai", team: "vermillion" },
+  { id: "west", displayName: "西座", controller: "ai", team: "indigo" },
+];
+
+/** 升级：打过 A 才算赢下整场，其余情况最多停在 A。 */
+export function advanceLevel(from: NumberRank, gained: number): { level: NumberRank; champion: boolean } {
+  if (from === "A") return { level: "A", champion: true };
+  const target = Math.min(NUMBER_RANKS.indexOf(from) + gained, NUMBER_RANKS.length - 1);
+  return { level: NUMBER_RANKS[target], champion: false };
+}
+
+/** 头游队友的名次决定升几级：双下 3 级，三游 2 级，末游 1 级。 */
+export function levelsForPartnerPlace(partnerPlace: number): number {
+  if (partnerPlace <= 2) return 3;
+  if (partnerPlace === 3) return 2;
+  return 1;
+}
+
+function createDeal(match: MatchState, leadPlayerId: PlayerId, random: () => number): GuandanState {
   const hands: Record<PlayerId, GuandanCard[]> = { human: [], east: [], partner: [], west: [] };
   shuffled(createDeck(), random).forEach((card, index) => {
     hands[PLAYER_ORDER[index % PLAYER_ORDER.length]].push(card);
   });
 
-  const levelRank: NumberRank = "2";
-  const players: readonly GuandanPlayer[] = [
-    { id: "human", displayName: "你", controller: "human", team: "vermillion", hand: sortHand(hands.human, levelRank) },
-    { id: "east", displayName: "东座", controller: "ai", team: "indigo", hand: sortHand(hands.east, levelRank) },
-    { id: "partner", displayName: "对家", controller: "ai", team: "vermillion", hand: sortHand(hands.partner, levelRank) },
-    { id: "west", displayName: "西座", controller: "ai", team: "indigo", hand: sortHand(hands.west, levelRank) },
-  ];
-  const dealAction = action(0, "table", "deal", "双副牌已发完。你先领出第一手牌。");
+  const levelRank = match.levels[match.attackingTeam];
+  const players = SEATS.map((seat) => ({ ...seat, hand: sortHand(hands[seat.id], levelRank) }));
+  const opening = match.dealNumber === 1
+    ? `双副牌已发完。本局打 ${levelRank}，${getPlayerFrom(players, leadPlayerId).displayName}先领出。`
+    : `第 ${match.dealNumber} 局开始，打 ${teamName(match.attackingTeam)}的 ${levelRank}。${getPlayerFrom(players, leadPlayerId).displayName}先领出。`;
+  const dealAction = action(0, "table", "deal", opening);
+
   return {
     revision: 0,
     status: "playing",
     levelRank,
     players,
-    activePlayerId: "human",
+    activePlayerId: leadPlayerId,
     consecutivePasses: 0,
     finishOrder: [],
+    match,
     lastAction: dealAction,
     log: [dealAction],
   };
+}
+
+function getPlayerFrom(players: readonly GuandanPlayer[], id: PlayerId): GuandanPlayer {
+  const player = players.find((entry) => entry.id === id);
+  if (!player) throw new Error(`Unknown Guandan player: ${id}`);
+  return player;
+}
+
+export function createInitialState(random: () => number = Math.random): GuandanState {
+  return createDeal(INITIAL_MATCH, "human", random);
+}
+
+/** 开下一局：由上一局头游先领出，级牌换成新的打级方级别。 */
+export function startNextDeal(state: GuandanState, random: () => number = Math.random): GuandanState {
+  if (state.status !== "finished" || state.match.champion) return state;
+  const lead = state.finishOrder[0] ?? "human";
+  return createDeal({ ...state.match, dealNumber: state.match.dealNumber + 1 }, lead, random);
+}
+
+/** 重开整场比赛，级别归零。 */
+export function restartMatch(random: () => number = Math.random): GuandanState {
+  return createInitialState(random);
 }
 
 export function getPlayError(state: GuandanState, actorId: PlayerId, cardIds: readonly string[]): string | undefined {
@@ -290,24 +341,61 @@ export function playCards(state: GuandanState, actorId: PlayerId, cardIds: reado
     ? { ...player, hand: remainingHand, finishedPlace: justFinished ? finishOrder.length : player.finishedPlace }
     : player,
   );
-  const winner = (["vermillion", "indigo"] as const).find((team) =>
+  // 一队两人都走完即定局；胜方是头游所在队，与谁先走空无关。
+  const dealOver = (["vermillion", "indigo"] as const).some((team) =>
     players.filter((player) => player.team === team).every((player) => player.hand.length === 0),
   );
+  const winner = dealOver && finishOrder.length > 0
+    ? getPlayerFrom(players, finishOrder[0]).team
+    : undefined;
+  const match = winner ? settleMatch(state.match, winner, finishOrder, players) : state.match;
   const text = justFinished
-    ? `${actor.displayName}打出${selectedCombo.label}并率先收完手牌。`
+    ? `${actor.displayName}打出${selectedCombo.label}并收完手牌。`
     : `${actor.displayName}打出${selectedCombo.label}，还剩 ${remainingHand.length} 张。`;
   const nextAction = action(state.revision + 1, actorId, justFinished ? "finish" : "play", text, selectedCombo);
 
-  return appendAction({
+  const played = appendAction({
     ...state,
     status: winner ? "finished" : "playing",
     winner,
     players,
     finishOrder,
+    match,
     activePlayerId: winner ? actorId : nextActivePlayerId(players, actorId),
     trick: { actorId, combo: selectedCombo },
     consecutivePasses: 0,
   }, nextAction);
+
+  const result = winner ? match.lastResult : undefined;
+  if (!result) return played;
+  const summary = match.champion
+    ? `${teamName(winner!)}打过 A，赢下整场比赛。`
+    : `${teamName(winner!)}${result.partnerPlace <= 2 ? "双下" : "获胜"}，升 ${result.gained} 级至 ${result.toLevel}。`;
+  return appendAction(played, action(played.revision + 1, "table", "settle", summary));
+}
+
+function settleMatch(
+  match: MatchState,
+  winner: TeamId,
+  finishOrder: readonly PlayerId[],
+  players: readonly GuandanPlayer[],
+): MatchState {
+  const leader = finishOrder[0];
+  const partner = players.find((player) => player.team === winner && player.id !== leader);
+  const partnerIndex = partner ? finishOrder.indexOf(partner.id) : -1;
+  // 没进结算顺序的只可能是最后一个还握着牌的人，也就是末游。
+  const partnerPlace = partnerIndex >= 0 ? partnerIndex + 1 : PLAYER_ORDER.length;
+  const gained = levelsForPartnerPlace(partnerPlace);
+  const fromLevel = match.levels[winner];
+  const { level: toLevel, champion } = advanceLevel(fromLevel, gained);
+
+  return {
+    levels: { ...match.levels, [winner]: toLevel },
+    dealNumber: match.dealNumber,
+    attackingTeam: winner,
+    champion: champion ? winner : undefined,
+    lastResult: { winner, partnerPlace, gained, fromLevel, toLevel, finishOrder },
+  };
 }
 
 export function canPass(state: GuandanState, actorId: PlayerId): boolean {

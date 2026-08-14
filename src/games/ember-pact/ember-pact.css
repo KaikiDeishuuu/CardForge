@@ -225,6 +225,13 @@
   font-weight: 800;
 }
 
+.player-seat__identity em.is-you {
+  color: #17383d;
+  background: #e3b35f;
+  border-color: #e3b35f;
+  font-weight: 900;
+}
+
 .health-row {
   display: flex;
   align-items: center;
@@ -776,15 +783,51 @@
 }
 
 .passive-note {
+  position: relative;
   min-width: 0;
   padding: 10px;
   display: flex;
   align-items: center;
   gap: 10px;
+  text-align: left;
   background: rgba(255, 255, 255, 0.34);
   border: 1px solid rgba(46, 78, 79, 0.13);
   border-radius: 11px 2px 11px 2px;
+  cursor: pointer;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
 }
+
+.passive-note:hover {
+  transform: translateY(-2px);
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.passive-note.is-chosen {
+  background: rgba(255, 255, 255, 0.66);
+  border-color: #3f7476;
+  box-shadow: inset 0 0 0 1px #3f7476;
+}
+
+.passive-note.is-chosen.team-dusk {
+  border-color: #8b554b;
+  box-shadow: inset 0 0 0 1px #8b554b;
+}
+
+.passive-note__pick {
+  position: absolute;
+  top: -8px;
+  right: 8px;
+  padding: 2px 7px;
+  color: #f6ead3;
+  background: #3f7476;
+  border-radius: 3px;
+  font-family: var(--utility);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+}
+
+.passive-note.team-dusk .passive-note__pick { background: #8b554b; }
 
 .passive-note > span {
   width: 34px;
@@ -1289,5 +1332,22 @@
 
   .card-frame__title {
     font-size: 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .player-seat.is-targetable,
+  .effect-pop,
+  .forge-line.is-overheating .forge-mark,
+  .battle-log,
+  .ledger-overlay,
+  .result-overlay {
+    animation: none;
+  }
+
+  .passive-note,
+  .passive-note:hover {
+    transition: none;
+    transform: none;
   }
 }

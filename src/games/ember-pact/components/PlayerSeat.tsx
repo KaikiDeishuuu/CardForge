@@ -51,7 +51,7 @@ export function PlayerSeat({
       type="button"
       className={`player-seat team-${combatant.team} ${active ? "is-active" : ""} ${targetable ? "is-targetable" : ""} ${defeated ? "is-defeated" : ""}`}
       onClick={() => targetable ? onTarget(combatant.id) : onInspect(combatant.id)}
-      aria-label={`${combatant.displayName}，生命 ${combatant.hp}/${combatant.maxHp}${targetable ? "，可选为目标" : "，查看详情"}`}
+      aria-label={`${combatant.displayName}${combatant.controller === "human" ? "（你）" : ""}，生命 ${combatant.hp}/${combatant.maxHp}${targetable ? "，可选为目标" : "，查看详情"}`}
     >
       <span className="player-seat__portrait" aria-hidden="true">
         <span>{combatant.monogram}</span>
@@ -62,7 +62,7 @@ export function PlayerSeat({
             <strong>{combatant.displayName}</strong>
             <small>{combatant.title}</small>
           </span>
-          {combatant.controller === "ai" && <em>AI</em>}
+          {combatant.controller === "ai" ? <em>AI</em> : <em className="is-you">你</em>}
         </span>
         <span className="health-row">
           <span className="health-track" aria-hidden="true">
