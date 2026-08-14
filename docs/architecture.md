@@ -90,6 +90,9 @@ Demo 自己拥有：
 - 游戏 `domain` 继续使用 Vitest 覆盖洗牌、合法行动、效果结算、AI 决策和胜负等纯函数；
 - React 组件测试覆盖 GameHost 恢复与共享声音服务等独立 UI 能力；
 - Playwright 从真实大厅入口验证动态加载、规则弹层、关键操作、键盘交互、声音偏好和三档响应式视口；
-- GitHub Actions 在主分支推送和拉取请求上依次执行类型检查、单元测试、生产构建与浏览器测试。
+- ESLint 启用 `eslint-plugin-react-hooks` 的 React Compiler 规则集，除经典的 hook 规则外还包括 `set-state-in-effect`、`static-components`、`refs` 等；三款游戏的“思考中”标记因此改为渲染期派生，不再用 effect 写状态；
+- GitHub Actions 在主分支推送和拉取请求上依次执行 lint、类型检查、单元测试、生产构建与浏览器测试。
+
+全仓仅有两处规则豁免，均在源码中写明原因：`GameHost` 的 `static-components`（重建懒加载组件正是重试机制本身）与同一处的 `exhaustive-deps`（`attempt` 是缓存键而非读取值）。
 
 E2E 只观察用户可见角色、名称和状态，不依赖规则层内部数据，也不向业务组件添加测试专用分支。失败时保留截图、视频、trace 和 HTML 报告；正常产物不进入版本库。

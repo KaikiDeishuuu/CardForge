@@ -46,7 +46,6 @@ export function GuandanGame({ onExit }: GameRuntimeProps) {
   const [showRules, setShowRules] = useState(true);
   const [showLog, setShowLog] = useState(false);
   const [autoPilot, setAutoPilot] = useState(false);
-  const [aiThinking, setAiThinking] = useState(false);
   const [hintText, setHintText] = useState<string>();
   const { enabled: soundEnabled, toggle: toggleSound, play: playSound } = useSound();
 
@@ -61,19 +60,17 @@ export function GuandanGame({ onExit }: GameRuntimeProps) {
     [selectedCards, state.levelRank],
   );
   const humanCanAct = state.status === "playing" && state.activePlayerId === "human" && !autoPilot && !showRules && !showLog;
+  // Derived, not stored: a seat is thinking exactly while its move is pending.
+  const automate = state.status === "playing"
+    && (active.controller === "ai" || (active.id === "human" && autoPilot));
+  const aiThinking = automate && !showRules && !showLog;
   const playError = selectedIds.length > 0 ? getPlayError(state, "human", selectedIds) : undefined;
   const handMidpoint = Math.ceil(human.hand.length / 2);
   const handRows = [human.hand.slice(0, handMidpoint), human.hand.slice(handMidpoint)];
 
   useEffect(() => {
-    const automate = state.status === "playing"
-      && (active.controller === "ai" || (active.id === "human" && autoPilot));
-    if (!automate || showRules || showLog) {
-      setAiThinking(false);
-      return;
-    }
+    if (!aiThinking) return;
 
-    setAiThinking(true);
     const expectedRevision = state.revision;
     const expectedActor = state.activePlayerId;
     const timer = window.setTimeout(() => {
@@ -89,7 +86,7 @@ export function GuandanGame({ onExit }: GameRuntimeProps) {
       setHintText(undefined);
     }, 460);
     return () => window.clearTimeout(timer);
-  }, [active.controller, active.id, autoPilot, playSound, showLog, showRules, state]);
+  }, [aiThinking, playSound, state]);
 
   useEffect(() => {
     if (state.status === "finished") playSound(state.winner === human.team ? "win" : "tap");

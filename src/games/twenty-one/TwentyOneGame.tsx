@@ -32,7 +32,6 @@ function ScoreDial({ value, label }: { value: number; label: string }) {
 export function TwentyOneGame({ onExit }: GameRuntimeProps) {
   const [state, setState] = useState(createInitialState);
   const [showRules, setShowRules] = useState(true);
-  const [dealerThinking, setDealerThinking] = useState(false);
   const { enabled: soundEnabled, toggle: toggleSound, play: playSound } = useSound();
 
   const playerValue = useMemo(() => evaluateHand(state.playerHand), [state.playerHand]);
@@ -42,14 +41,12 @@ export function TwentyOneGame({ onExit }: GameRuntimeProps) {
     : evaluateHand(state.dealerHand.slice(0, 1));
   const latestCardId = state.lastEvent?.card?.id;
   const canAct = state.phase === "player-turn" && !showRules;
+  // Derived, not stored: the dealer is thinking exactly while their step is pending.
+  const dealerThinking = state.phase === "dealer-turn" && !showRules;
 
   useEffect(() => {
-    if (state.phase !== "dealer-turn" || showRules) {
-      setDealerThinking(false);
-      return;
-    }
+    if (!dealerThinking) return;
 
-    setDealerThinking(true);
     const expectedRevision = state.revision;
     const timer = window.setTimeout(() => {
       setState((current) => {
@@ -60,13 +57,10 @@ export function TwentyOneGame({ onExit }: GameRuntimeProps) {
     }, 760);
 
     return () => window.clearTimeout(timer);
-  }, [dealerValue.total, playSound, showRules, state.phase, state.revision]);
+  }, [dealerThinking, dealerValue.total, playSound, state.revision]);
 
   useEffect(() => {
-    if (state.phase === "settled") {
-      setDealerThinking(false);
-      playSound(state.outcome === "player" ? "win" : "tap");
-    }
+    if (state.phase === "settled") playSound(state.outcome === "player" ? "win" : "tap");
   }, [playSound, state.outcome, state.phase]);
 
   function hit() {
@@ -83,7 +77,6 @@ export function TwentyOneGame({ onExit }: GameRuntimeProps) {
 
   function restart() {
     setState(createInitialState());
-    setDealerThinking(false);
     playSound("card");
   }
 
