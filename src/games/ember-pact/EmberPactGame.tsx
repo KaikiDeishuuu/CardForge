@@ -29,7 +29,6 @@ const cueForKind: Record<CardKind, "hit" | "card" | "heal"> = {
 export function EmberPactGame({ onExit }: GameRuntimeProps) {
   const [state, setState] = useState(createInitialState);
   const [selectedUid, setSelectedUid] = useState<string>();
-  const [aiThinking, setAiThinking] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const [showBrief, setShowBrief] = useState(true);
   const [inspectedId, setInspectedId] = useState<string>();
@@ -38,18 +37,16 @@ export function EmberPactGame({ onExit }: GameRuntimeProps) {
   const active = getCombatant(state, state.activePlayerId);
   const player = getCombatant(state, "player")!;
   const isHumanTurn = state.status === "playing" && active?.controller === "human";
+  // Derived, not stored: a combatant is thinking exactly while its move is pending.
+  const aiThinking = state.status === "playing" && active?.controller === "ai" && !showBrief && !inspectedId;
   const validTargetIds = useMemo(
     () => selectedUid ? getValidTargetIds(state, "player", selectedUid) : [],
     [selectedUid, state],
   );
 
   useEffect(() => {
-    if (state.status !== "playing" || active?.controller !== "ai" || showBrief || inspectedId) {
-      setAiThinking(false);
-      return;
-    }
+    if (!aiThinking || !active) return;
 
-    setAiThinking(true);
     const expectedRevision = state.revision;
     const expectedActor = active.id;
     const move = chooseAiMove(state, expectedActor);
@@ -65,11 +62,10 @@ export function EmberPactGame({ onExit }: GameRuntimeProps) {
           ? playCard(current, expectedActor, move.cardUid, move.targetId)
           : passTurn(current, expectedActor);
       });
-      setAiThinking(false);
     }, 720);
 
     return () => window.clearTimeout(timer);
-  }, [active, inspectedId, playSound, showBrief, state]);
+  }, [active, aiThinking, playSound, state]);
 
   useEffect(() => {
     if (state.status === "finished") playSound("win");

@@ -23,7 +23,12 @@ function getFocusableElements(container: HTMLElement): HTMLElement[] {
 export function useModalFocus({ active, initialFocus, onDismiss }: ModalFocusOptions) {
   const modalRef = useRef<HTMLDivElement>(null);
   const onDismissRef = useRef(onDismiss);
-  onDismissRef.current = onDismiss;
+
+  // Kept current after commit rather than during render: the keydown listener
+  // below only reads it while handling an event, which is always later.
+  useEffect(() => {
+    onDismissRef.current = onDismiss;
+  });
 
   useEffect(() => {
     if (!active || !modalRef.current) return;

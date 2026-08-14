@@ -20,15 +20,9 @@ export default tseslint.config(
   },
   {
     files: ["src/**/*.{ts,tsx}"],
-    plugins: { "react-hooks": reactHooks, "react-refresh": reactRefresh },
+    extends: [reactHooks.configs.flat["recommended-latest"]],
+    plugins: { "react-refresh": reactRefresh },
     rules: {
-      // The two classic hook rules are enforced. eslint-plugin-react-hooks v7 also
-      // ships the React Compiler rules (set-state-in-effect, static-components,
-      // refs, purity, immutability). Every game schedules its AI turn by setting
-      // state from an effect, and GameHost builds its lazy game component during
-      // render on purpose, so adopting those rules is a redesign rather than a
-      // lint pass. Left off deliberately; revisit if the turn schedulers change.
-      "react-hooks/rules-of-hooks": "error",
       "react-hooks/exhaustive-deps": "error",
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
     },

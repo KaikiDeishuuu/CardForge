@@ -129,6 +129,13 @@ export function GameHost({ registration, onExit, reloadPage = () => window.locat
       <Suspense fallback={
         <GameLoading gameName={gameName} retrying={attempt > 0} />
       }>
+        {/*
+          Rebuilding the lazy component is the retry: a fresh component type is
+          what discards the failed import so the browser re-fetches the chunk.
+          This subtree is meant to lose its state, and the boundary key above
+          forces that too, so static-components is knowingly violated here.
+        */}
+        {/* eslint-disable-next-line react-hooks/static-components */}
         <LoadedGame onExit={onExit} />
       </Suspense>
     </GameErrorBoundary>
