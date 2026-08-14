@@ -1,0 +1,122 @@
+import type { Combatant } from "../domain/types";
+import { PASSIVE_CATALOG, STATUS_CATALOG } from "../domain/data";
+
+interface TacticalBriefProps {
+  combatants: readonly Combatant[];
+  onClose: () => void;
+}
+
+export function TacticalBrief({ combatants, onClose }: TacticalBriefProps) {
+  return (
+    <div className="ledger-overlay" role="dialog" aria-modal="true" aria-labelledby="brief-title">
+      <section className="forge-ledger forge-ledger--brief">
+        <header className="forge-ledger__header">
+          <span className="ledger-seal" aria-hidden="true">谱</span>
+          <span>
+            <small>战术炉谱</small>
+            <h2 id="brief-title">先看炉火，再决定落牌</h2>
+          </span>
+          <button type="button" onClick={onClose} aria-label="关闭战术炉谱">×</button>
+        </header>
+
+        <p className="ledger-intro">
+          四名角色各自携带一套牌与一项被动。每回合只能打出一张牌，状态和行动顺序比单次伤害更重要。
+        </p>
+
+        <div className="ledger-section">
+          <h3>角色炉印</h3>
+          <div className="passive-grid">
+            {combatants.map((combatant) => {
+              const passive = PASSIVE_CATALOG[combatant.passiveId];
+              return (
+                <article key={combatant.id} className={`passive-note team-${combatant.team}`}>
+                  <span>{combatant.monogram}</span>
+                  <div>
+                    <small>{combatant.displayName} · {combatant.title}</small>
+                    <strong>{passive.name}</strong>
+                    <p>{passive.description}</p>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="ledger-section">
+          <h3>状态炉印</h3>
+          <div className="status-glossary">
+            {Object.values(STATUS_CATALOG).map((status) => (
+              <article key={status.id} style={{ "--status-tone": status.tone } as React.CSSProperties}>
+                <span>{status.symbol}</span>
+                <div><strong>{status.name}</strong><p>{status.description}</p></div>
+              </article>
+            ))}
+          </div>
+        </div>
+
+        <div className="ledger-rules">
+          <span><b>护盾</b>在角色下一次行动开始时清空</span>
+          <span><b>满手</b>达到 6 张后，新抽牌进入弃牌堆</span>
+          <span><b>过载</b>第 13 轮起，行动结束承受递增真实伤害</span>
+        </div>
+
+        <button type="button" className="ledger-enter" onClick={onClose}>
+          点亮熔炉
+        </button>
+      </section>
+    </div>
+  );
+}
+
+interface CombatantSheetProps {
+  combatant: Combatant;
+  onClose: () => void;
+}
+
+export function CombatantSheet({ combatant, onClose }: CombatantSheetProps) {
+  const passive = PASSIVE_CATALOG[combatant.passiveId];
+  return (
+    <div className="ledger-overlay ledger-overlay--sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" onClick={onClose}>
+      <section className="forge-ledger combatant-sheet" onClick={(event) => event.stopPropagation()}>
+        <header className="forge-ledger__header">
+          <span className={`ledger-seal team-${combatant.team}`} aria-hidden="true">{combatant.monogram}</span>
+          <span>
+            <small>{combatant.title}</small>
+            <h2 id="sheet-title">{combatant.displayName}</h2>
+          </span>
+          <button type="button" onClick={onClose} aria-label="关闭角色详情" autoFocus>×</button>
+        </header>
+
+        <div className="sheet-vitals">
+          <span><small>生命</small><b>{combatant.hp} / {combatant.maxHp}</b></span>
+          <span><small>护盾</small><b>{combatant.block}</b></span>
+          <span><small>手牌</small><b>{combatant.hand.length}</b></span>
+        </div>
+
+        <article className="sheet-passive">
+          <small>角色被动</small>
+          <strong>{passive.name}</strong>
+          <p>{passive.description}</p>
+        </article>
+
+        <div className="sheet-statuses">
+          <small>当前状态</small>
+          {combatant.statuses.length === 0 ? (
+            <p>没有持续状态。</p>
+          ) : combatant.statuses.map((status) => {
+            const definition = STATUS_CATALOG[status.id];
+            return (
+              <article key={status.id} style={{ "--status-tone": definition.tone } as React.CSSProperties}>
+                <span>{definition.symbol}</span>
+                <div>
+                  <strong>{definition.name}{status.remainingTurns ? ` · ${status.remainingTurns} 回合` : ""}</strong>
+                  <p>{definition.description}</p>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+    </div>
+  );
+}
