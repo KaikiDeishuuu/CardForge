@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { GameRuntimeProps } from "../../core/games/types";
 import { useSound } from "../../shared/audio/SoundProvider";
+import { useModalFocus } from "../../shared/ui/useModalFocus";
 import { PlayingCard } from "./components/PlayingCard";
 import { createInitialState, dealerStep, evaluateHand, playerHit, playerStand } from "./domain/engine";
 import type { TwentyOneOutcome } from "./domain/types";
@@ -95,6 +96,15 @@ export function TwentyOneGame({ onExit }: GameRuntimeProps) {
           ? "庄家正在权衡，并从牌靴取牌…"
           : "庄家停牌，正在核对刻度…"
       : state.lastEvent?.text ?? state.log.at(-1)?.text;
+  const rulesModalRef = useModalFocus({
+    active: showRules,
+    initialFocus: ".rule-ledger__enter",
+    onDismiss: () => setShowRules(false),
+  });
+  const resultModalRef = useModalFocus({
+    active: state.phase === "settled" && Boolean(state.outcome) && !showRules,
+    initialFocus: ".outcome-ticket__actions button",
+  });
 
   return (
     <main className="twenty-one-screen">
@@ -173,7 +183,7 @@ export function TwentyOneGame({ onExit }: GameRuntimeProps) {
       </footer>
 
       {showRules && (
-        <div className="twenty-one-modal" role="dialog" aria-modal="true" aria-labelledby="twenty-one-rules-title">
+        <div ref={rulesModalRef} className="twenty-one-modal" role="dialog" aria-modal="true" aria-labelledby="twenty-one-rules-title" tabIndex={-1}>
           <div className="rule-ledger">
             <button type="button" className="rule-ledger__close" onClick={() => setShowRules(false)} aria-label="关闭规则">×</button>
             <small>TABLE NOTE · 002</small>
@@ -190,7 +200,7 @@ export function TwentyOneGame({ onExit }: GameRuntimeProps) {
       )}
 
       {state.phase === "settled" && state.outcome && !showRules && (
-        <div className="twenty-one-modal twenty-one-modal--result" role="dialog" aria-modal="true" aria-labelledby="twenty-one-result-title">
+        <div ref={resultModalRef} className="twenty-one-modal twenty-one-modal--result" role="dialog" aria-modal="true" aria-labelledby="twenty-one-result-title" tabIndex={-1}>
           <div className={`outcome-ticket outcome-ticket--${state.outcome}`}>
             <span className="outcome-ticket__mark" aria-hidden="true">{OUTCOME_COPY[state.outcome].mark}</span>
             <small>{OUTCOME_COPY[state.outcome].eyebrow}</small>

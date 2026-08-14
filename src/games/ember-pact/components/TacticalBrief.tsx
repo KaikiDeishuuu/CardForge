@@ -1,5 +1,6 @@
 import type { Combatant } from "../domain/types";
 import { PASSIVE_CATALOG, STATUS_CATALOG } from "../domain/data";
+import { useModalFocus } from "../../../shared/ui/useModalFocus";
 
 interface TacticalBriefProps {
   combatants: readonly Combatant[];
@@ -7,8 +8,10 @@ interface TacticalBriefProps {
 }
 
 export function TacticalBrief({ combatants, onClose }: TacticalBriefProps) {
+  const modalRef = useModalFocus({ active: true, initialFocus: ".ledger-enter", onDismiss: onClose });
+
   return (
-    <div className="ledger-overlay" role="dialog" aria-modal="true" aria-labelledby="brief-title">
+    <div ref={modalRef} className="ledger-overlay" role="dialog" aria-modal="true" aria-labelledby="brief-title" tabIndex={-1}>
       <section className="forge-ledger forge-ledger--brief">
         <header className="forge-ledger__header">
           <span className="ledger-seal" aria-hidden="true">谱</span>
@@ -75,8 +78,10 @@ interface CombatantSheetProps {
 
 export function CombatantSheet({ combatant, onClose }: CombatantSheetProps) {
   const passive = PASSIVE_CATALOG[combatant.passiveId];
+  const modalRef = useModalFocus({ active: true, initialFocus: "button", onDismiss: onClose });
+
   return (
-    <div className="ledger-overlay ledger-overlay--sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" onClick={onClose}>
+    <div ref={modalRef} className="ledger-overlay ledger-overlay--sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title" tabIndex={-1} onClick={onClose}>
       <section className="forge-ledger combatant-sheet" onClick={(event) => event.stopPropagation()}>
         <header className="forge-ledger__header">
           <span className={`ledger-seal team-${combatant.team}`} aria-hidden="true">{combatant.monogram}</span>
@@ -84,7 +89,7 @@ export function CombatantSheet({ combatant, onClose }: CombatantSheetProps) {
             <small>{combatant.title}</small>
             <h2 id="sheet-title">{combatant.displayName}</h2>
           </span>
-          <button type="button" onClick={onClose} aria-label="关闭角色详情" autoFocus>×</button>
+          <button type="button" onClick={onClose} aria-label="关闭角色详情">×</button>
         </header>
 
         <div className="sheet-vitals">

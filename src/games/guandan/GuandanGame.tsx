@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import type { GameRuntimeProps } from "../../core/games/types";
 import { useSound } from "../../shared/audio/SoundProvider";
+import { useModalFocus } from "../../shared/ui/useModalFocus";
 import { GuandanCardView } from "./components/GuandanCardView";
 import { chooseAiMove } from "./domain/ai";
 import {
@@ -131,6 +132,28 @@ export function GuandanGame({ onExit }: GameRuntimeProps) {
     playSound("tap");
   }
 
+  function moveHandFocus(event: KeyboardEvent<HTMLDivElement>) {
+    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+
+    const cards = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button.gd-card"));
+    const currentIndex = cards.indexOf(document.activeElement as HTMLButtonElement);
+    if (currentIndex < 0) return;
+
+    let nextIndex = currentIndex;
+    if (event.key === "ArrowLeft") nextIndex -= 1;
+    if (event.key === "ArrowRight") nextIndex += 1;
+    if (event.key === "ArrowUp") nextIndex -= handMidpoint;
+    if (event.key === "ArrowDown") nextIndex += handMidpoint;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = cards.length - 1;
+
+    nextIndex = Math.max(0, Math.min(cards.length - 1, nextIndex));
+    if (nextIndex === currentIndex) return;
+
+    event.preventDefault();
+    cards[nextIndex].focus({ preventScroll: true });
+  }
+
   function restart() {
     setState(createInitialState());
     setSelectedIds([]);
@@ -145,6 +168,15 @@ export function GuandanGame({ onExit }: GameRuntimeProps) {
   const opposingPlayers = state.players.filter((player) => player.id === "east" || player.id === "west");
   const partner = getPlayer(state, "partner");
   const resultWon = state.winner === human.team;
+  const rulesModalRef = useModalFocus({
+    active: showRules,
+    initialFocus: ".gd-rule-board__enter",
+    onDismiss: () => setShowRules(false),
+  });
+  const resultModalRef = useModalFocus({
+    active: state.status === "finished" && Boolean(state.winner) && !showRules,
+    initialFocus: ".gd-result-board footer button",
+  });
 
   return (
     <main className="guandan-screen">
@@ -193,7 +225,7 @@ export function GuandanGame({ onExit }: GameRuntimeProps) {
         </div>
       </section>
 
-      <section className="gd-hand-dock" aria-label="你的手牌">
+      <section className="gd-hand-dock" aria-label="你的手牌" aria-describedby="gd-hand-keyboard-hint">
         <header className="gd-hand-heading">
           <span><small>朱雀方 · 南座</small><strong>你的手牌 <i>{human.hand.length}</i></strong></span>
           <span className="gd-selection-status">
@@ -208,7 +240,8 @@ export function GuandanGame({ onExit }: GameRuntimeProps) {
           </button>
         </header>
 
-        <div className="gd-hand-rows">
+        <span id="gd-hand-keyboard-hint" className="visually-hidden">使用方向键浏览手牌，按空格键选择。</span>
+        <div className="gd-hand-rows" onKeyDown={moveHandFocus}>
           {handRows.map((row, rowIndex) => (
             <div className="gd-hand-row" key={`${rowIndex}-${human.hand.length}`}>
               {row.map((card) => (
@@ -242,7 +275,7 @@ export function GuandanGame({ onExit }: GameRuntimeProps) {
       )}
 
       {showRules && (
-        <div className="gd-modal" role="dialog" aria-modal="true" aria-labelledby="gd-rules-title">
+        <div ref={rulesModalRef} className="gd-modal" role="dialog" aria-modal="true" aria-labelledby="gd-rules-title" tabIndex={-1}>
           <div className="gd-rule-board">
             <button type="button" className="gd-rule-board__close" onClick={() => setShowRules(false)} aria-label="关闭规则">×</button>
             <span className="gd-rule-board__ribbon">入门局</span>
@@ -262,7 +295,7 @@ export function GuandanGame({ onExit }: GameRuntimeProps) {
       )}
 
       {state.status === "finished" && state.winner && !showRules && (
-        <div className="gd-modal gd-modal--result" role="dialog" aria-modal="true" aria-labelledby="gd-result-title">
+        <div ref={resultModalRef} className="gd-modal gd-modal--result" role="dialog" aria-modal="true" aria-labelledby="gd-result-title" tabIndex={-1}>
           <div className={`gd-result-board gd-result-board--${state.winner}`}>
             <span className="gd-result-board__seal" aria-hidden="true">{resultWon ? "贯" : "再"}</span>
             <small>{teamName(state.winner)}完成牌局</small>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { GameRuntimeProps } from "../../core/games/types";
 import { useSound } from "../../shared/audio/SoundProvider";
+import { useModalFocus } from "../../shared/ui/useModalFocus";
 import { PlayerHand } from "./components/PlayerHand";
 import { PlayerSeat } from "./components/PlayerSeat";
 import { CombatantSheet, TacticalBrief } from "./components/TacticalBrief";
@@ -111,6 +112,10 @@ export function EmberPactGame({ onExit }: GameRuntimeProps) {
   const overheatAmount = state.roundNumber >= OVERHEAT_START_ROUND
     ? state.roundNumber - OVERHEAT_START_ROUND + 1
     : 0;
+  const resultModalRef = useModalFocus({
+    active: state.status === "finished" && Boolean(state.winner),
+    initialFocus: ".primary-button",
+  });
 
   return (
     <main className="battle-screen">
@@ -230,7 +235,7 @@ export function EmberPactGame({ onExit }: GameRuntimeProps) {
       )}
 
       {state.status === "finished" && state.winner && (
-        <div className="result-overlay" role="dialog" aria-modal="true" aria-labelledby="result-title">
+        <div ref={resultModalRef} className="result-overlay" role="dialog" aria-modal="true" aria-labelledby="result-title" tabIndex={-1}>
           <div className={`result-card result-card--${state.winner}`}>
             <span className="result-card__seal" aria-hidden="true">{state.winner === "dawn" ? "铸" : "蚀"}</span>
             <small>试炼完成</small>

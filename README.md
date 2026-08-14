@@ -31,7 +31,7 @@ npm run build
 src/
   app/                    # 平台大厅与游戏装载入口
   core/games/             # 游戏清单、注册表、最小运行契约
-  shared/                 # 无玩法规则的卡牌视觉、声音、基础身份类型
+  shared/                 # 无玩法规则的卡牌视觉、声音、焦点与基础身份类型
   games/
     registry.ts           # 平台唯一的游戏登记处
     ember-pact/           # 独立 Demo：规则、数据、AI、组件与样式
