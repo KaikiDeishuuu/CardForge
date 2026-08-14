@@ -648,39 +648,57 @@ a:focus-visible {
 }
 
 .game-loading {
+  position: relative;
   min-height: 100vh;
+  min-height: 100dvh;
+  padding: 28px;
   display: grid;
   place-content: center;
   justify-items: center;
-  gap: 20px;
+  gap: 18px;
   color: #e8dfcd;
-  background: var(--ink);
+  background:
+    radial-gradient(circle at 50% 45%, rgba(71, 122, 124, 0.25), transparent 30%),
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    var(--ink);
+  background-size: auto, 32px 32px, 32px 32px, auto;
   font-family: var(--display);
+  overflow: hidden;
 }
 
-.game-loading > span:last-child {
+.game-loading__copy {
   display: flex;
   flex-direction: column;
   align-items: center;
+  text-align: center;
 }
 
-.game-loading > span:last-child small {
+.game-loading__copy small {
   margin-bottom: 5px;
-  color: #b9cac7;
+  color: #d08b6d;
   font-family: var(--utility);
   font-size: 8px;
   font-weight: 800;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.2em;
 }
 
-.game-loading > span:last-child strong {
-  font-size: 22px;
+.game-loading__copy strong {
+  font-size: clamp(26px, 5vw, 36px);
   letter-spacing: 0.06em;
 }
 
+.game-loading__copy p {
+  margin: 8px 0 0;
+  color: #9fb6b3;
+  font-family: var(--utility);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+}
+
 .game-loading .forge-spinner {
-  width: 58px;
-  height: 58px;
+  width: 66px;
+  height: 66px;
   border-color: rgba(232, 223, 205, 0.42);
   animation: spin 1.4s linear infinite;
 }
@@ -688,6 +706,29 @@ a:focus-visible {
 .game-loading .forge-spinner i {
   height: 28px;
   background: #d06b53;
+}
+
+.game-loading__rail {
+  width: min(76vw, 390px);
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: rgba(199, 219, 215, 0.5);
+  font-family: var(--utility);
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+}
+
+.game-loading__rail i {
+  height: 1px;
+  flex: 1;
+  background: rgba(199, 219, 215, 0.18);
+}
+
+.game-loading__rail b {
+  font-weight: 800;
 }
 
 .game-error {
@@ -776,6 +817,11 @@ a:focus-visible {
   font-size: 14px;
   font-weight: 700;
   cursor: pointer;
+  transition: transform 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+
+.game-error__card button:hover {
+  transform: translateY(-2px);
 }
 
 .game-error__reload {
@@ -926,6 +972,14 @@ a:focus-visible {
 
   .lobby-footer > p {
     display: none;
+  }
+
+  .game-error__card {
+    padding-inline: 34px;
+  }
+
+  .game-error__card > div {
+    grid-template-columns: 1fr;
   }
 }
 

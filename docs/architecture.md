@@ -21,7 +21,7 @@ CardForge 采用三层很薄的结构：
 
 `App` 只解析大厅与当前游戏 ID，并通过 `?game=<id>` 同步浏览器历史。只有注册为 `playable` 且提供 loader 的 ID 才能恢复；从大厅进入游戏会创建历史项，浏览器返回键和游戏内退出都会回到大厅。URL 处理是纯函数并独立测试，不需要引入路由框架。
 
-`GameHost` 统一提供动态模块的 Suspense 加载状态和 Error Boundary。某个游戏的 chunk 加载失败或 React 渲染异常时，只替换为该牌桌的恢复页，用户可以重新加载或返回大厅，不会让整个 CardForge 白屏。它不理解游戏状态，也不接管游戏内重开、AI 或回合。
+`GameHost` 统一提供动态模块的 Suspense 加载状态和 Error Boundary。某个游戏的 chunk 加载失败或 React 渲染异常时，只替换为该牌桌的恢复页。渲染异常会本地重建 lazy loader 和错误边界；动态 import 网络失败则保留当前 `?game=` 入口并刷新页面，以清除浏览器缓存的模块失败状态。它不理解游戏状态，也不接管游戏内重开、AI 或回合。
 
 ### shared
 
