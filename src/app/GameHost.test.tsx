@@ -1,8 +1,9 @@
 /* @vitest-environment jsdom */
 
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import type { GameModule, GameRegistration } from "../core/games/types";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { GameModule, GameRegistration, GameRuntimeProps } from "../core/games/types";
+import { clearGameSave, loadGameSave, saveGameSave } from "../shared/storage/GameSaveStore";
 import { GameHost } from "./GameHost";
 import { isModuleLoadError } from "./moduleLoadError";
 
@@ -22,6 +23,10 @@ function createRegistration(load: NonNullable<GameRegistration["load"]>): GameRe
     load,
   };
 }
+
+beforeEach(() => {
+  window.localStorage.clear();
+});
 
 afterEach(() => {
   cleanup();
@@ -103,5 +108,32 @@ describe("GameHost", () => {
 
     expect(await screen.findByText("恢复后的牌桌")).toBeTruthy();
     expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it("hands the game a persistence handle that restores and stores raw data", async () => {
+    saveGameSave("test-table", 1, 3, { hp: 12 });
+    const load = vi.fn().mockResolvedValue({
+      Game: ({ persistence }: GameRuntimeProps) => (
+        <main>
+          <output data-testid="restored">
+            {persistence?.restored ? String(persistence.restored.schemaVersion) : "none"}
+          </output>
+          <button type="button" onClick={() => persistence?.save(1, 9, { hp: 1 })}>保存</button>
+          <button type="button" onClick={() => persistence?.clear()}>清除</button>
+        </main>
+      ),
+    });
+
+    render(<GameHost registration={createRegistration(load)} onExit={vi.fn()} />);
+
+    expect((await screen.findByTestId("restored")).textContent).toBe("1");
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    expect(loadGameSave("test-table")?.snapshot).toMatchObject({ revision: 9, gameId: "test-table" });
+    expect(loadGameSave("test-table")?.snapshot.data).toEqual({ hp: 1 });
+
+    fireEvent.click(screen.getByRole("button", { name: "清除" }));
+    expect(loadGameSave("test-table")).toBeUndefined();
+    expect(clearGameSave("test-table")).toBeUndefined();
   });
 });

@@ -17,6 +17,7 @@ import {
   passTurn,
   playCard,
 } from "./domain/engine";
+import { PACT_SAVE_SCHEMA_VERSION, restorePactState, serializePactState } from "./domain/persistence";
 import type { CardKind } from "./domain/types";
 import "./ember-pact.css";
 
@@ -27,13 +28,20 @@ const cueForKind: Record<CardKind, "hit" | "card" | "heal"> = {
   tactic: "card",
 };
 
-export function EmberPactGame({ onExit }: GameRuntimeProps) {
-  const [chosenId, setChosenId] = useState(DEFAULT_HUMAN_ID);
-  const [state, setState] = useState(() => createInitialState(Math.random, DEFAULT_HUMAN_ID));
+export function EmberPactGame({ onExit, persistence }: GameRuntimeProps) {
+  const restored = useMemo(
+    () => persistence?.restored && persistence.restored.schemaVersion === PACT_SAVE_SCHEMA_VERSION
+      ? restorePactState(persistence.restored.data)
+      : undefined,
+    [persistence],
+  );
+  const [chosenId, setChosenId] = useState(() =>
+    restored?.combatants.find((combatant) => combatant.controller === "human")?.id ?? DEFAULT_HUMAN_ID);
+  const [state, setState] = useState(() => restored ?? createInitialState(Math.random, DEFAULT_HUMAN_ID));
   const [selectedUid, setSelectedUid] = useState<string>();
   const [showLog, setShowLog] = useState(false);
-  const [showBrief, setShowBrief] = useState(true);
-  const [setupComplete, setSetupComplete] = useState(false);
+  const [showBrief, setShowBrief] = useState(restored === undefined);
+  const [setupComplete, setSetupComplete] = useState(restored !== undefined);
   const [inspectedId, setInspectedId] = useState<string>();
   const { enabled: soundEnabled, toggle: toggleSound, play: playSound } = useSound();
 
@@ -76,6 +84,20 @@ export function EmberPactGame({ onExit }: GameRuntimeProps) {
   useEffect(() => {
     if (state.status === "finished") playSound(state.winner === player.team ? "win" : "tap");
   }, [playSound, player.team, state.status, state.winner]);
+
+  useEffect(() => {
+    if (!persistence) return;
+    // 单场对局：落定即清除存档，下次进入从新开局开始。
+    if (state.status === "finished") {
+      persistence.clear();
+      return;
+    }
+    // 没有任何进展（revision 0）且此前没有存档时不落盘：避免把
+    // 「进过牌桌但什么都没做」也当作可续玩的对局。重开产生的新局
+    // 在有旧档时会在这里直接覆盖它。
+    if (state.revision === 0 && !persistence.restored) return;
+    persistence.save(PACT_SAVE_SCHEMA_VERSION, state.revision, serializePactState(state));
+  }, [persistence, state]);
 
   function handleSelect(uid: string) {
     if (!isHumanTurn) return;

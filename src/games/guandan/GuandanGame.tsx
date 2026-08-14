@@ -16,6 +16,7 @@ import {
   startNextDeal,
   teamName,
 } from "./domain/engine";
+import { GUANDAN_SAVE_SCHEMA_VERSION, restoreGuandanState, serializeGuandanState } from "./domain/persistence";
 import type { AiMove, GuandanPlayer, GuandanState, PlayerId } from "./domain/types";
 import "./guandan.css";
 
@@ -41,10 +42,16 @@ function applyMove(state: GuandanState, actorId: PlayerId, move: AiMove | undefi
     : passTurn(state, actorId);
 }
 
-export function GuandanGame({ onExit }: GameRuntimeProps) {
-  const [state, setState] = useState(createInitialState);
+export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
+  const restored = useMemo(
+    () => persistence?.restored && persistence.restored.schemaVersion === GUANDAN_SAVE_SCHEMA_VERSION
+      ? restoreGuandanState(persistence.restored.data)
+      : undefined,
+    [persistence],
+  );
+  const [state, setState] = useState(() => restored ?? createInitialState());
   const [selectedIds, setSelectedIds] = useState<readonly string[]>([]);
-  const [showRules, setShowRules] = useState(true);
+  const [showRules, setShowRules] = useState(restored === undefined);
   const [showLog, setShowLog] = useState(false);
   const [autoPilot, setAutoPilot] = useState(false);
   const [hintText, setHintText] = useState<string>();
@@ -92,6 +99,21 @@ export function GuandanGame({ onExit }: GameRuntimeProps) {
   useEffect(() => {
     if (state.status === "finished") playSound(state.winner === human.team ? "win" : "tap");
   }, [human.team, playSound, state.status, state.winner]);
+
+  // 连续升级对局跨刷新存续：下一局、级别与胜负都随状态落盘；
+  // 只有整场打过 A（或玩家主动再来一场）才清除旧档。
+  useEffect(() => {
+    if (!persistence) return;
+    if (state.match.champion) {
+      persistence.clear();
+      return;
+    }
+    // 没有任何进展（revision 0）且此前没有存档时不落盘：避免把
+    // 「进过牌桌但什么都没做」也当作可续玩的对局。下一局与再来一场
+    // 产生的新局在有旧档时会在这里直接覆盖它。
+    if (state.revision === 0 && !persistence.restored) return;
+    persistence.save(GUANDAN_SAVE_SCHEMA_VERSION, state.revision, serializeGuandanState(state));
+  }, [persistence, state]);
 
   function toggleCard(id: string) {
     if (!humanCanAct) return;

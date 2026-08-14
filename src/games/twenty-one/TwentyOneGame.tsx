@@ -15,6 +15,7 @@ import {
   playerHit,
   playerStand,
 } from "./domain/engine";
+import { TWENTY_ONE_SAVE_SCHEMA_VERSION, restoreTwentyOneState, serializeTwentyOneState } from "./domain/persistence";
 import type { TwentyOneOutcome } from "./domain/types";
 import "./twenty-one.css";
 
@@ -40,9 +41,15 @@ function ScoreDial({ value, label }: { value: number; label: string }) {
   );
 }
 
-export function TwentyOneGame({ onExit }: GameRuntimeProps) {
-  const [state, setState] = useState(createInitialState);
-  const [showRules, setShowRules] = useState(true);
+export function TwentyOneGame({ onExit, persistence }: GameRuntimeProps) {
+  const restored = useMemo(
+    () => persistence?.restored && persistence.restored.schemaVersion === TWENTY_ONE_SAVE_SCHEMA_VERSION
+      ? restoreTwentyOneState(persistence.restored.data)
+      : undefined,
+    [persistence],
+  );
+  const [state, setState] = useState(() => restored ?? createInitialState());
+  const [showRules, setShowRules] = useState(restored === undefined);
   const { enabled: soundEnabled, toggle: toggleSound, play: playSound } = useSound();
 
   const playerValue = useMemo(() => evaluateHand(state.playerHand), [state.playerHand]);
@@ -79,6 +86,15 @@ export function TwentyOneGame({ onExit }: GameRuntimeProps) {
   useEffect(() => {
     if (state.phase === "settled") playSound(state.outcome === "player" ? "win" : "tap");
   }, [playSound, state.outcome, state.phase]);
+
+  // 筹码与牌靴跨手、跨刷新存续；重新入座会写入全新开局覆盖旧档。
+  useEffect(() => {
+    if (!persistence) return;
+    // 没有任何进展（revision 0）且此前没有存档时不落盘：避免把
+    // 「进过牌桌但什么都没做」也当作可续玩的对局。
+    if (state.revision === 0 && !persistence.restored) return;
+    persistence.save(TWENTY_ONE_SAVE_SCHEMA_VERSION, state.revision, serializeTwentyOneState(state));
+  }, [persistence, state]);
 
   function hit() {
     if (!canAct) return;

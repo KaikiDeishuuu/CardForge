@@ -1,5 +1,6 @@
 import { Component, lazy, Suspense, useMemo, useState, type ErrorInfo, type ReactNode } from "react";
-import type { GameRegistration } from "../core/games/types";
+import type { GamePersistenceHandle, GameRegistration } from "../core/games/types";
+import { clearGameSave, loadGameSave, saveGameSave } from "../shared/storage/GameSaveStore";
 import { isModuleLoadError } from "./moduleLoadError";
 
 interface GameHostProps {
@@ -99,6 +100,18 @@ export function GameHost({ registration, onExit, reloadPage = () => window.locat
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attempt, registration]);
 
+  // 存档句柄只搬运字节：平台既不校验也不解读内容，schemaVersion 由游戏
+  // 在读写时自行携带并判定。
+  const persistence = useMemo<GamePersistenceHandle>(() => {
+    const saved = loadGameSave(registration.manifest.id);
+    return {
+      restored: saved ? { schemaVersion: saved.schemaVersion, data: saved.snapshot.data } : undefined,
+      save: (schemaVersion, revision, data) =>
+        saveGameSave(registration.manifest.id, schemaVersion, revision, data),
+      clear: () => clearGameSave(registration.manifest.id),
+    };
+  }, [registration.manifest.id]);
+
   if (!LoadedGame) return null;
   const gameName = registration.manifest.shortName;
   return (
@@ -124,7 +137,7 @@ export function GameHost({ registration, onExit, reloadPage = () => window.locat
           forces that too, so static-components is knowingly violated here.
         */}
         {/* eslint-disable-next-line react-hooks/static-components */}
-        <LoadedGame onExit={onExit} />
+        <LoadedGame onExit={onExit} persistence={persistence} />
       </Suspense>
     </GameErrorBoundary>
   );

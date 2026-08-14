@@ -136,6 +136,29 @@ test("二十一刻可以下注、要牌并结算到下一手", async ({ page }) 
   assertNoPageErrors();
 });
 
+test("二十一刻的对局会跨刷新续玩", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "断点续玩与视口无关，只在一个桌面项目验证");
+  const assertNoPageErrors = collectPageErrors(page);
+  await page.goto("/?game=twenty-one");
+  await page.getByRole("button", { name: /开始判断/ }).click();
+
+  await expect(page.locator(".chip-stack b")).toHaveText("500");
+  await page.getByRole("button", { name: "压 25 枚筹码" }).click();
+  await expect(page.locator(".playing-hand--player .tw-card")).toHaveCount(2);
+  // 等存档真正落盘再刷新，避免在 effect 写入前就重载。
+  await expect.poll(() =>
+    page.evaluate(() => window.localStorage.getItem("cardforge.save.twenty-one") !== null),
+  ).toBe(true);
+
+  const phaseBefore = await page.locator(".table-status small").textContent();
+  await page.reload();
+
+  await expect(page.locator(".playing-hand--player .tw-card")).toHaveCount(2);
+  await expect(page.locator(".table-status small")).toHaveText(phaseBefore ?? "");
+  await expect(page.locator(".chip-stack em")).toHaveText("押 25");
+  assertNoPageErrors();
+});
+
 test("掼蛋支持键盘浏览、提示与出牌", async ({ page }) => {
   const assertNoPageErrors = collectPageErrors(page);
   await page.goto("/?game=guandan");
