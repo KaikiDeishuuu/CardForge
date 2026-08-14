@@ -646,6 +646,26 @@ a:focus-visible {
   font-family: var(--display);
 }
 
+.game-loading > span:last-child {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.game-loading > span:last-child small {
+  margin-bottom: 5px;
+  color: #b9cac7;
+  font-family: var(--utility);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+}
+
+.game-loading > span:last-child strong {
+  font-size: 22px;
+  letter-spacing: 0.06em;
+}
+
 .game-loading .forge-spinner {
   width: 58px;
   height: 58px;
@@ -656,6 +676,106 @@ a:focus-visible {
 .game-loading .forge-spinner i {
   height: 28px;
   background: #d06b53;
+}
+
+.game-error {
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 24px;
+  display: grid;
+  place-items: center;
+  color: #f2e7d2;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    #122f35;
+  background-size: 28px 28px;
+}
+
+.game-error__card {
+  position: relative;
+  width: min(100%, 460px);
+  padding: clamp(42px, 8vw, 64px);
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid #d4bf92;
+  border-radius: 4px 24px 4px 24px;
+  box-shadow: 16px 20px 0 rgba(203, 96, 74, 0.2), 0 30px 80px rgba(1, 18, 23, 0.36);
+}
+
+.game-error__card::before {
+  content: "";
+  position: absolute;
+  inset: 9px;
+  pointer-events: none;
+  border: 1px solid rgba(23, 53, 58, 0.16);
+  border-radius: 2px 17px 2px 17px;
+}
+
+.game-error__seal {
+  width: 54px;
+  height: 54px;
+  margin-bottom: 24px;
+  display: grid;
+  place-items: center;
+  color: #fff0dc;
+  background: var(--red);
+  border: 5px solid var(--paper);
+  border-radius: 50%;
+  outline: 1px solid #bc9060;
+  font-family: var(--display);
+  font-size: 25px;
+}
+
+.game-error__card > small {
+  color: #a94c3b;
+  font-family: var(--utility);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+}
+
+.game-error__card h1 {
+  margin: 10px 0 16px;
+  font-family: var(--display);
+  font-size: clamp(32px, 7vw, 46px);
+  line-height: 1.12;
+  letter-spacing: -0.04em;
+}
+
+.game-error__card p {
+  margin: 0;
+  color: #62777a;
+  font-size: 12px;
+  line-height: 1.75;
+}
+
+.game-error__card > div {
+  margin-top: 28px;
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  gap: 8px;
+}
+
+.game-error__card button {
+  min-height: 50px;
+  border-radius: 3px 13px 3px 13px;
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.game-error__reload {
+  color: #fff2df;
+  background: var(--red);
+  border: 1px solid var(--red);
+}
+
+.game-error__exit {
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid rgba(23, 53, 58, 0.28);
 }
 
 @keyframes rise-in {
