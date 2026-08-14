@@ -98,10 +98,12 @@ test("二十一刻可以下注、要牌并结算到下一手", async ({ page }) 
   const hit = page.getByRole("button", { name: /要牌/ });
   const cards = page.locator(".playing-hand--player .tw-card");
 
-  // 押注后有可能直接 Blackjack 结算，那就开下一手再试。
+  // 押注后有可能直接 Blackjack 结算，赔付会立刻改写筹码，下一轮的起点也随之不同。
+  // 所以这里只断言确实发了牌、押注已记在牌桌上，不断言具体余额。
   for (let attempt = 0; attempt < 6; attempt += 1) {
     await page.getByRole("button", { name: "压 25 枚筹码" }).click();
-    await expect(chips).toHaveText("475");
+    await expect(cards).toHaveCount(2);
+    await expect(page.locator(".chip-stack em")).toHaveText("押 25");
     if (await hit.isEnabled()) break;
     await page.getByRole("button", { name: /下一手/ }).click();
   }
