@@ -116,6 +116,26 @@ describe("Ember Pact engine", () => {
     expect(getCombatant(hunted, "player")?.hp).toBe(19);
   });
 
+  it("does not brand a target its own earlier effect defeated", () => {
+    const weakened = updateActor(createInitialState(fixedRandom), "scar", { hp: 1 });
+    const cinder = giveCard(weakened, "player", "cinder");
+    const result = playCard(cinder.state, "player", cinder.card.uid, "scar");
+
+    expect(getCombatant(result, "scar")?.hp).toBe(0);
+    expect(hasStatus(getCombatant(result, "scar")!, "burning")).toBe(false);
+    expect(result.lastAction?.events.some((event) => event.kind === "status-applied")).toBe(false);
+  });
+
+  it("stays quiet when a heal restores nothing but still pays the passive", () => {
+    const lunaTurn = { ...createInitialState(fixedRandom), activePlayerId: "luna" };
+    const heal = giveCard(lunaTurn, "luna", "rekindle");
+    const result = playCard(heal.state, "luna", heal.card.uid, "player");
+
+    expect(getCombatant(result, "player")?.hp).toBe(24);
+    expect(result.lastAction?.events.some((event) => event.kind === "heal")).toBe(false);
+    expect(getCombatant(result, "player")?.block).toBe(2);
+  });
+
   it("cleanses harmful statuses while healing", () => {
     let state = updateActor(createInitialState(fixedRandom), "player", {
       hp: 20,
@@ -143,6 +163,28 @@ describe("Ember Pact engine", () => {
     expect(getCombatant(next, "luna")?.hand).toHaveLength(HAND_LIMIT);
     expect(getCombatant(next, "luna")?.discard).toHaveLength(luna.discard.length + 1);
     expect(next.lastAction?.events.some((event) => event.kind === "card-overflow")).toBe(true);
+  });
+
+  it("reshuffles an exhausted deck instead of dealing the discard back in order", () => {
+    const base = createInitialState(fixedRandom);
+    const source = getCombatant(base, "player")!;
+    const pile = [...source.deck, ...source.hand];
+    const emptied = updateActor(base, "player", { deck: [], discard: pile, hand: [] });
+
+    // ember acts last, so the turn wraps to player, whose draw must recycle.
+    const recycledOrder = (rngSeed: number) => {
+      const next = passTurn({ ...emptied, activePlayerId: "ember", rngSeed }, "ember");
+      const after = getCombatant(next, "player")!;
+      return [...after.deck, ...after.hand].map((card) => card.uid);
+    };
+
+    const order = recycledOrder(7);
+    expect(order).toHaveLength(pile.length);
+    expect([...order].sort()).toEqual(pile.map((card) => card.uid).sort());
+    expect(order, "must not simply replay the discard pile backwards")
+      .not.toEqual([...pile].reverse().map((card) => card.uid));
+    expect(order, "a different seed must produce a different shuffle")
+      .not.toEqual(recycledOrder(99));
   });
 
   it("lets the scored AI choose a legal move and prefer a match-winning attack", () => {

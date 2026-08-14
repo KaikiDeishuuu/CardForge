@@ -41,6 +41,9 @@ export const gameRegistry = new GameRegistry().register({
     sessionLength: "约 8–10 分钟",
     availability: "playable",
     accent: "#cf6049",
+    featured: true,
+    mark: "烬",
+    tagline: "架构验证局",
   },
   load: () => import("./ember-pact"),
 }).register({
@@ -54,6 +57,7 @@ export const gameRegistry = new GameRegistry().register({
     sessionLength: "约 2–3 分钟",
     availability: "playable",
     accent: "#a47b44",
+    mark: "21",
   },
   load: () => import("./twenty-one"),
 }).register({
@@ -67,6 +71,7 @@ export const gameRegistry = new GameRegistry().register({
     sessionLength: "约 6–10 分钟",
     availability: "playable",
     accent: "#b33a37",
+    mark: "贯",
   },
   load: () => import("./guandan"),
 });

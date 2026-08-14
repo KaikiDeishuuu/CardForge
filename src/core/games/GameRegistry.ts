@@ -5,11 +5,11 @@ export class GameRegistry {
 
   register(game: GameRegistration): this {
     if (this.#games.has(game.manifest.id)) {
-      throw new Error(`Game \"${game.manifest.id}\" is already registered.`);
+      throw new Error(`Game "${game.manifest.id}" is already registered.`);
     }
 
     if (game.manifest.availability === "playable" && !game.load) {
-      throw new Error(`Playable game \"${game.manifest.id}\" needs a loader.`);
+      throw new Error(`Playable game "${game.manifest.id}" needs a loader.`);
     }
 
     this.#games.set(game.manifest.id, game);

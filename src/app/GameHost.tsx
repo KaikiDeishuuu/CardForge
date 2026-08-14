@@ -100,12 +100,15 @@ export function isModuleLoadError(error: Error): boolean {
 
 export function GameHost({ registration, onExit, reloadPage = () => window.location.reload() }: GameHostProps) {
   const [attempt, setAttempt] = useState(0);
+  // `attempt` is a cache key, not a value the loader reads: bumping it is what
+  // discards React's memo of a failed lazy component so a retry re-imports.
   const LoadedGame = useMemo(() => {
     if (!registration.load) return null;
     return lazy(async () => {
       const module = await registration.load!();
       return { default: module.Game };
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attempt, registration]);
 
   if (!LoadedGame) return null;

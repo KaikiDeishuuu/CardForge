@@ -15,7 +15,7 @@ import {
   playCards,
   teamName,
 } from "./domain/engine";
-import type { GuandanPlayer, GuandanState, PlayerId } from "./domain/types";
+import type { AiMove, GuandanPlayer, GuandanState, PlayerId } from "./domain/types";
 import "./guandan.css";
 
 function Seat({ player, active, lastActorId }: { player: GuandanPlayer; active: boolean; lastActorId?: PlayerId }) {
@@ -33,8 +33,7 @@ function Seat({ player, active, lastActorId }: { player: GuandanPlayer; active: 
   );
 }
 
-function applyMove(state: GuandanState, actorId: PlayerId) {
-  const move = chooseAiMove(state, actorId);
+function applyMove(state: GuandanState, actorId: PlayerId, move: AiMove | undefined) {
   if (!move) return state;
   return move.kind === "play"
     ? playCards(state, actorId, move.cardIds)
@@ -78,13 +77,14 @@ export function GuandanGame({ onExit }: GameRuntimeProps) {
     const expectedRevision = state.revision;
     const expectedActor = state.activePlayerId;
     const timer = window.setTimeout(() => {
+      // Decided once and reused: scanning a 27-card hand for legal combos is the
+      // most expensive thing this table does per turn.
       const move = chooseAiMove(state, expectedActor);
       setState((current) => {
         if (current.revision !== expectedRevision || current.activePlayerId !== expectedActor) return current;
-        return applyMove(current, expectedActor);
+        return applyMove(current, expectedActor, move);
       });
-      if (move?.kind === "play") playSound("card");
-      else playSound("tap");
+      playSound(move?.kind === "play" ? "card" : "tap");
       setSelectedIds([]);
       setHintText(undefined);
     }, 460);
@@ -243,7 +243,7 @@ export function GuandanGame({ onExit }: GameRuntimeProps) {
         <span id="gd-hand-keyboard-hint" className="visually-hidden">使用方向键浏览手牌，按空格键选择。</span>
         <div className="gd-hand-rows" onKeyDown={moveHandFocus}>
           {handRows.map((row, rowIndex) => (
-            <div className="gd-hand-row" key={`${rowIndex}-${human.hand.length}`}>
+            <div className="gd-hand-row" key={rowIndex}>
               {row.map((card) => (
                 <GuandanCardView
                   key={card.id}

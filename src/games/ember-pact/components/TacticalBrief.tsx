@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import type { Combatant } from "../domain/types";
 import { PASSIVE_CATALOG, STATUS_CATALOG } from "../domain/data";
 import { useModalFocus } from "../../../shared/ui/useModalFocus";
@@ -49,7 +50,7 @@ export function TacticalBrief({ combatants, onClose }: TacticalBriefProps) {
           <h3>状态炉印</h3>
           <div className="status-glossary">
             {Object.values(STATUS_CATALOG).map((status) => (
-              <article key={status.id} style={{ "--status-tone": status.tone } as React.CSSProperties}>
+              <article key={status.id} style={{ "--status-tone": status.tone } as CSSProperties}>
                 <span>{status.symbol}</span>
                 <div><strong>{status.name}</strong><p>{status.description}</p></div>
               </article>
@@ -111,7 +112,7 @@ export function CombatantSheet({ combatant, onClose }: CombatantSheetProps) {
           ) : combatant.statuses.map((status) => {
             const definition = STATUS_CATALOG[status.id];
             return (
-              <article key={status.id} style={{ "--status-tone": definition.tone } as React.CSSProperties}>
+              <article key={status.id} style={{ "--status-tone": definition.tone } as CSSProperties}>
                 <span>{definition.symbol}</span>
                 <div>
                   <strong>{definition.name}{status.remainingTurns ? ` · ${status.remainingTurns} 回合` : ""}</strong>

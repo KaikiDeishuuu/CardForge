@@ -104,6 +104,8 @@ export interface EmberPactState {
   readonly winner?: TeamId;
   readonly log: readonly BattleLogEntry[];
   readonly lastAction?: LastAction;
+  /** Advances every time an exhausted deck is reshuffled, keeping the engine pure. */
+  readonly rngSeed: number;
 }
 
 export interface AiMove {

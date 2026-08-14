@@ -1,6 +1,9 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const localChrome = process.env.CI ? {} : { channel: "chrome" as const };
+// Local runs prefer the system Chrome. Set PW_CHANNEL="" to fall back to the
+// Chromium that `npx playwright install` downloads, which is what CI uses.
+const channel = process.env.PW_CHANNEL ?? (process.env.CI ? "" : "chrome");
+const localChrome = channel ? { channel } : {};
 
 export default defineConfig({
   testDir: "./e2e",

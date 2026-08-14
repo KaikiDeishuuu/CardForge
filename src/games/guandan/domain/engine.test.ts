@@ -130,6 +130,39 @@ describe("Guandan engine", () => {
     expect(chooseAiMove(game, "human")?.kind).toBe("play");
   });
 
+  it("takes a partner's trick when the play empties its own hand", () => {
+    const last = card("A");
+    const opening = classifyCombo([card("3")], "2")!;
+    const game = state([
+      { ...player("human", []), finishedPlace: 1 },
+      player("east", [card("K")]),
+      player("partner", [last]),
+      player("west", [card("Q")]),
+    ], {
+      activePlayerId: "partner",
+      trick: { actorId: "human", combo: opening },
+      finishOrder: ["human"],
+    });
+
+    expect(chooseAiMove(game, "partner")).toEqual({ kind: "play", cardIds: [last.id] });
+    expect(playCards(game, "partner", [last.id]).winner).toBe("vermillion");
+  });
+
+  it("still yields to a partner's trick when it cannot finish", () => {
+    const opening = classifyCombo([card("3")], "2")!;
+    const game = state([
+      player("human", [card("5")]),
+      player("east", [card("K")]),
+      player("partner", [card("A"), card("9")]),
+      player("west", [card("Q")]),
+    ], {
+      activePlayerId: "partner",
+      trick: { actorId: "human", combo: opening },
+    });
+
+    expect(chooseAiMove(game, "partner")).toEqual({ kind: "pass" });
+  });
+
   it("can complete a deterministic four-seat game using only AI decisions", () => {
     let game = createInitialState(() => 0.37);
     let actions = 0;
