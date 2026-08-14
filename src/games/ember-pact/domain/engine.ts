@@ -19,6 +19,7 @@ export const OVERHEAT_START_ROUND = 13;
 interface DrawResult {
   readonly combatant: Combatant;
   readonly overflow?: CardInstance;
+  readonly seed: number;
 }
 
 interface AdvanceResult {
@@ -35,6 +36,24 @@ function shuffled<T>(items: readonly T[], random: () => number): T[] {
   return result;
 }
 
+// Reshuffling happens mid-match, deep inside turn advancement, so the engine
+// carries a seed in state instead of threading a random callback through every
+// entry point. Actions stay pure functions of the state they receive.
+function advanceSeed(seed: number): number {
+  return (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+}
+
+function reshuffle<T>(items: readonly T[], seed: number): { items: T[]; seed: number } {
+  const result = [...items];
+  let current = seed;
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    current = advanceSeed(current);
+    const swapIndex = current % (index + 1);
+    [result[index], result[swapIndex]] = [result[swapIndex], result[index]];
+  }
+  return { items: result, seed: current };
+}
+
 function replaceCombatant(
   combatants: readonly Combatant[],
   id: string,
@@ -43,17 +62,20 @@ function replaceCombatant(
   return combatants.map((combatant) => combatant.id === id ? update(combatant) : combatant);
 }
 
-function drawOne(combatant: Combatant): DrawResult {
+function drawOne(combatant: Combatant, seed: number): DrawResult {
   let deck = [...combatant.deck];
   let discard = [...combatant.discard];
+  let nextSeed = seed;
 
   if (deck.length === 0 && discard.length > 0) {
-    deck = [...discard].reverse();
+    const recycled = reshuffle(discard, seed);
+    deck = recycled.items;
+    nextSeed = recycled.seed;
     discard = [];
   }
 
   const card = deck.at(-1);
-  if (!card) return { combatant: { ...combatant, deck, discard } };
+  if (!card) return { combatant: { ...combatant, deck, discard }, seed: nextSeed };
 
   if (combatant.hand.length >= HAND_LIMIT) {
     return {
@@ -63,6 +85,7 @@ function drawOne(combatant: Combatant): DrawResult {
         discard: [...discard, card],
       },
       overflow: card,
+      seed: nextSeed,
     };
   }
 
@@ -73,18 +96,27 @@ function drawOne(combatant: Combatant): DrawResult {
       discard,
       hand: [...combatant.hand, card],
     },
+    seed: nextSeed,
   };
 }
 
-function dealOpeningHand(combatant: Combatant): Combatant {
+function dealOpeningHand(combatant: Combatant, seed: number): { combatant: Combatant; seed: number } {
   let result = combatant;
-  for (let count = 0; count < 4; count += 1) result = drawOne(result).combatant;
-  return result;
+  let current = seed;
+  for (let count = 0; count < 4; count += 1) {
+    const draw = drawOne(result, current);
+    result = draw.combatant;
+    current = draw.seed;
+  }
+  return { combatant: result, seed: current };
 }
 
 export function createInitialState(random: () => number = Math.random): EmberPactState {
-  const combatants = COMBATANT_SEEDS.map((seed) =>
-    dealOpeningHand({
+  let rngSeed = Math.floor(random() * 2_147_483_647) || 1;
+  const combatants: Combatant[] = [];
+
+  for (const seed of COMBATANT_SEEDS) {
+    const dealt = dealOpeningHand({
       ...seed,
       hp: seed.maxHp,
       block: 0,
@@ -92,8 +124,10 @@ export function createInitialState(random: () => number = Math.random): EmberPac
       hand: [],
       deck: shuffled(buildDeck(seed.id), random),
       discard: [],
-    }),
-  );
+    }, rngSeed);
+    combatants.push(dealt.combatant);
+    rngSeed = dealt.seed;
+  }
 
   return {
     revision: 0,
@@ -103,6 +137,7 @@ export function createInitialState(random: () => number = Math.random): EmberPac
     combatants,
     status: "playing",
     log: [{ id: 0, text: "熔炉点亮。晨铸同盟先行。" }],
+    rngSeed,
   };
 }
 
@@ -160,7 +195,9 @@ function putStatus(
   events: ResolvedEvent[],
 ): Combatant[] {
   const target = combatants.find((combatant) => combatant.id === targetId);
-  if (!target) return [...combatants];
+  // A card's earlier effect can defeat its own target, so a status must not land
+  // on someone already off the battlefield.
+  if (!target || target.hp <= 0) return [...combatants];
   const existing = target.statuses.find((status) => status.id === statusId);
   const nextStatus: StatusInstance = duration === undefined
     ? { id: statusId }
@@ -330,13 +367,15 @@ function resolveHeal(
     ...combatant,
     hp: combatant.hp + recovered,
   }));
-  events.push({
-    kind: "heal",
-    targetId,
-    source: "card",
-    amount: recovered,
-    text: `${target.displayName}恢复 ${recovered} 点生命。`,
-  });
+  if (recovered > 0) {
+    events.push({
+      kind: "heal",
+      targetId,
+      source: "card",
+      amount: recovered,
+      text: `${target.displayName}恢复 ${recovered} 点生命。`,
+    });
+  }
   if (actor.passiveId === "afterglow") {
     next = resolveBlock(next, actorId, targetId, 2, "passive", events);
   }
@@ -451,7 +490,7 @@ function advanceTurn(state: EmberPactState): AdvanceResult {
   const nextId = state.combatants[nextIndex].id;
   const nextRound = nextIndex <= activeIndex ? state.roundNumber + 1 : state.roundNumber;
   const currentNext = state.combatants[nextIndex];
-  const draw = drawOne({ ...currentNext, block: 0 });
+  const draw = drawOne({ ...currentNext, block: 0 }, state.rngSeed);
   const combatants = replaceCombatant(state.combatants, nextId, () => draw.combatant);
   const events: ResolvedEvent[] = [];
   if (draw.overflow) {
@@ -470,6 +509,7 @@ function advanceTurn(state: EmberPactState): AdvanceResult {
       turnNumber: state.turnNumber + 1,
       roundNumber: nextRound,
       combatants,
+      rngSeed: draw.seed,
     },
     events,
   };

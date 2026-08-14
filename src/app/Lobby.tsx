@@ -8,10 +8,19 @@ interface LobbyProps {
   onLaunch: (id: string) => void;
 }
 
+function isLaunchable(game: GameRegistration): boolean {
+  return game.manifest.availability === "playable" && Boolean(game.load);
+}
+
 export function Lobby({ games, soundEnabled, onToggleSound, onLaunch }: LobbyProps) {
-  const featured = games.find((game) => game.manifest.id === "ember-pact")!;
-  const shelfGames = games.filter((game) => game.manifest.id !== featured.manifest.id);
-  const gameMarks: Readonly<Record<string, string>> = { "twenty-one": "21", guandan: "贯" };
+  const featured = games.find((game) => game.manifest.featured && isLaunchable(game))
+    ?? games.find(isLaunchable);
+  const shelfGames = featured
+    ? games.filter((game) => game.manifest.id !== featured.manifest.id)
+    : games;
+  const featuredCode = featured
+    ? `CF · ${String(games.indexOf(featured) + 1).padStart(3, "0")}`
+    : "";
 
   return (
     <main className="lobby">
@@ -43,26 +52,28 @@ export function Lobby({ games, soundEnabled, onToggleSound, onLaunch }: LobbyPro
           </dl>
         </div>
 
-        <button type="button" className="featured-game" onClick={() => onLaunch(featured.manifest.id)}>
-          <span className="featured-game__edge">现可游玩</span>
-          <span className="featured-game__top">
-            <span>{featured.manifest.genre}</span>
-            <i>CF · 001</i>
-          </span>
-          <span className="featured-game__sigil" aria-hidden="true">
-            <i /><i /><i />
-            <b>烬</b>
-          </span>
-          <span className="featured-game__copy">
-            <small>架构验证局</small>
-            <strong>{featured.manifest.name}</strong>
-            <span>{featured.manifest.description}</span>
-          </span>
-          <span className="featured-game__footer">
-            <span>{featured.manifest.players}<i />{featured.manifest.sessionLength}</span>
-            <b>揭牌进入 <i>→</i></b>
-          </span>
-        </button>
+        {featured && (
+          <button type="button" className="featured-game" onClick={() => onLaunch(featured.manifest.id)}>
+            <span className="featured-game__edge">现可游玩</span>
+            <span className="featured-game__top">
+              <span>{featured.manifest.genre}</span>
+              <i>{featuredCode}</i>
+            </span>
+            <span className="featured-game__sigil" aria-hidden="true">
+              <i /><i /><i />
+              <b>{featured.manifest.mark ?? "CF"}</b>
+            </span>
+            <span className="featured-game__copy">
+              <small>{featured.manifest.tagline ?? featured.manifest.genre}</small>
+              <strong>{featured.manifest.name}</strong>
+              <span>{featured.manifest.description}</span>
+            </span>
+            <span className="featured-game__footer">
+              <span>{featured.manifest.players}<i />{featured.manifest.sessionLength}</span>
+              <b>揭牌进入 <i>→</i></b>
+            </span>
+          </button>
+        )}
       </section>
 
       <section className="game-shelf" aria-labelledby="shelf-title">
@@ -75,7 +86,7 @@ export function Lobby({ games, soundEnabled, onToggleSound, onLaunch }: LobbyPro
         </div>
         <div className="planned-grid">
           {shelfGames.map((game) => {
-            const isPlayable = game.manifest.availability === "playable";
+            const isPlayable = isLaunchable(game);
             return (
             <button
               type="button"
@@ -87,7 +98,7 @@ export function Lobby({ games, soundEnabled, onToggleSound, onLaunch }: LobbyPro
             >
               <span className="planned-game__status">{isPlayable ? "现可游玩" : "筹备中"}</span>
               <span className="planned-game__glyph" aria-hidden="true">
-                {isPlayable ? <b>{gameMarks[game.manifest.id] ?? "CF"}</b> : <><i /><i /></>}
+                {isPlayable ? <b>{game.manifest.mark ?? "CF"}</b> : <><i /><i /></>}
               </span>
               <small>{game.manifest.genre}</small>
               <h3>{game.manifest.name}</h3>

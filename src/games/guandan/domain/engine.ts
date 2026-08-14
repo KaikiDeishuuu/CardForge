@@ -121,7 +121,10 @@ function sameRankPower(cards: readonly GuandanCard[], levelRank: NumberRank): nu
 }
 
 function fullHousePower(cards: readonly GuandanCard[], levelRank: NumberRank): number | undefined {
-  const wildCount = cards.filter((card) => isWild(card, levelRank)).length;
+  // Exactly five cards is what makes the wild arithmetic below hold: once every
+  // non-wild card belongs to the triple or the pair, the wilds necessarily fill
+  // the remaining slots, so only the per-rank caps still need checking.
+  if (cards.length !== 5) return undefined;
   const counts = nonWildRankCounts(cards, levelRank);
   if ([...counts.keys()].some((rank) => rank === "small-joker" || rank === "big-joker")) return undefined;
 
@@ -130,12 +133,8 @@ function fullHousePower(cards: readonly GuandanCard[], levelRank: NumberRank): n
     for (const pairRank of NUMBER_RANKS) {
       if (pairRank === tripleRank) continue;
       if ([...counts.keys()].some((rank) => rank !== tripleRank && rank !== pairRank)) continue;
-      const tripleCount = counts.get(tripleRank) ?? 0;
-      const pairCount = counts.get(pairRank) ?? 0;
-      if (tripleCount > 3 || pairCount > 2) continue;
-      if ((3 - tripleCount) + (2 - pairCount) === wildCount) {
-        matches.push(rankPower(tripleRank, levelRank));
-      }
+      if ((counts.get(tripleRank) ?? 0) > 3 || (counts.get(pairRank) ?? 0) > 2) continue;
+      matches.push(rankPower(tripleRank, levelRank));
     }
   }
   return matches.length > 0 ? Math.max(...matches) : undefined;
@@ -337,19 +336,6 @@ export function passTurn(state: GuandanState, actorId: PlayerId): GuandanState {
     activePlayerId: nextActivePlayerId(state.players, actorId),
     consecutivePasses: passes,
   }, action(state.revision + 1, actorId, "pass", `${actor.displayName}选择过牌。`));
-}
-
-function buildRankGroup(
-  hand: readonly GuandanCard[],
-  rank: NumberRank,
-  size: number,
-  levelRank: NumberRank,
-): GuandanCard[] | undefined {
-  const naturals = hand.filter((card) => card.rank === rank && !isWild(card, levelRank));
-  const wilds = hand.filter((card) => isWild(card, levelRank));
-  const naturalCards = naturals.slice(0, size);
-  const needed = size - naturalCards.length;
-  return needed <= wilds.length ? [...naturalCards, ...wilds.slice(0, needed)] : undefined;
 }
 
 export function generateLegalCombos(state: GuandanState, actorId: PlayerId): CardCombo[] {
