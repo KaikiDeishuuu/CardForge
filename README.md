@@ -23,7 +23,10 @@ npm run dev
 npm run typecheck
 npm test
 npm run build
+npm run test:e2e
 ```
+
+浏览器测试会自动启动本地 Vite 服务，并在手机竖屏、常见笔记本和宽桌面三种视口验证大厅、三款游戏主流程、宿主错误恢复、偏好持久化和页面溢出。首次在本机运行前需准备 Chrome；CI 会自动安装 Chromium。失败报告可通过 `npm run test:e2e:report` 打开。
 
 ## 项目结构
 
