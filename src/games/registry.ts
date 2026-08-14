@@ -4,19 +4,6 @@ import type { GameRegistration } from "../core/games/types";
 const plannedGames: readonly GameRegistration[] = [
   {
     manifest: {
-      id: "trick-table",
-      name: "搭档牌桌",
-      shortName: "搭档牌桌",
-      description: "合作、叫牌与不完全信息",
-      genre: "搭档竞技",
-      players: "3–4 人",
-      sessionLength: "约 12 分钟",
-      availability: "planned",
-      accent: "#557681",
-    },
-  },
-  {
-    manifest: {
       id: "color-current",
       name: "色流",
       shortName: "色流",
@@ -26,19 +13,6 @@ const plannedGames: readonly GameRegistration[] = [
       sessionLength: "约 8 分钟",
       availability: "planned",
       accent: "#c9654e",
-    },
-  },
-  {
-    manifest: {
-      id: "twenty-one",
-      name: "二十一刻",
-      shortName: "二十一刻",
-      description: "风险判断与桌面概率",
-      genre: "点数博弈",
-      players: "1–5 人",
-      sessionLength: "约 5 分钟",
-      availability: "planned",
-      accent: "#a47b44",
     },
   },
   {
@@ -69,6 +43,32 @@ export const gameRegistry = new GameRegistry().register({
     accent: "#cf6049",
   },
   load: () => import("./ember-pact"),
+}).register({
+  manifest: {
+    id: "twenty-one",
+    name: "二十一刻",
+    shortName: "二十一刻",
+    description: "读懂手里的刻度，在欲望与克制之间停下。",
+    genre: "轻量 21 点",
+    players: "单人 vs 庄家",
+    sessionLength: "约 2–3 分钟",
+    availability: "playable",
+    accent: "#a47b44",
+  },
+  load: () => import("./twenty-one"),
+}).register({
+  manifest: {
+    id: "guandan",
+    name: "掼蛋 · 入门局",
+    shortName: "掼蛋",
+    description: "双副牌四人对家，在跟牌、让牌与炸弹之间完成接力。",
+    genre: "对家牌型竞技",
+    players: "1 人 + 3 AI",
+    sessionLength: "约 6–10 分钟",
+    availability: "playable",
+    accent: "#b33a37",
+  },
+  load: () => import("./guandan"),
 });
 
 for (const game of plannedGames) gameRegistry.register(game);

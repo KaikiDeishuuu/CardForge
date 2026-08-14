@@ -472,12 +472,36 @@ a:focus-visible {
   background: rgba(246, 244, 235, 0.74);
   border: 1px solid rgba(23, 53, 58, 0.14);
   border-radius: 18px 3px 18px 3px;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: default;
   transition: transform 200ms ease, background 200ms ease;
 }
 
-.planned-game:hover {
+.planned-game:not(:disabled):hover {
   transform: translateY(-4px);
   background: rgba(250, 248, 239, 0.94);
+}
+
+.planned-game:disabled {
+  opacity: 1;
+}
+
+.planned-game.is-playable {
+  color: #f4ead7;
+  background:
+    radial-gradient(circle at 72% 22%, rgba(208, 173, 102, 0.12), transparent 28%),
+    #24384b;
+  border-color: rgba(219, 190, 132, 0.36);
+  box-shadow: 0 16px 34px rgba(26, 44, 54, 0.15);
+  cursor: pointer;
+}
+
+.planned-game.is-playable:not(:disabled):hover {
+  background:
+    radial-gradient(circle at 72% 22%, rgba(208, 173, 102, 0.18), transparent 30%),
+    #2a4054;
 }
 
 .planned-game::before {
@@ -522,6 +546,19 @@ a:focus-visible {
   transform: rotate(90deg);
 }
 
+.planned-game__glyph b {
+  position: absolute;
+  inset: 5px;
+  display: grid;
+  place-items: center;
+  color: #e2c17d;
+  border: 1px solid rgba(226, 193, 125, 0.34);
+  border-radius: 50%;
+  font-family: var(--display);
+  font-size: 20px;
+  font-weight: 600;
+}
+
 .planned-game > small {
   color: var(--game-accent);
   font-family: var(--utility);
@@ -541,6 +578,16 @@ a:focus-visible {
   color: #63787b;
   font-size: 12px;
   line-height: 1.6;
+}
+
+.planned-game.is-playable p,
+.planned-game.is-playable footer,
+.planned-game.is-playable .planned-game__status {
+  color: #b9c7c7;
+}
+
+.planned-game.is-playable h3 {
+  color: #f4ead7;
 }
 
 .planned-game footer {
