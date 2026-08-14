@@ -147,26 +147,85 @@ export const CARD_CATALOG: Record<string, BattleCard> = {
       { kind: "cleanse", statuses: ["exposed", "burning"], target: "chosen" },
     ],
   },
+  siphon: {
+    id: "siphon",
+    name: "汲取",
+    kind: "attack",
+    symbol: "⊘",
+    description: "造成 3 点伤害，并为自己恢复 2 点生命",
+    target: "enemy",
+    tone: "#8d4b63",
+    effects: [
+      { kind: "damage", amount: 3, target: "chosen" },
+      { kind: "heal", amount: 2, target: "self" },
+    ],
+  },
+  aegis: {
+    id: "aegis",
+    name: "守誓",
+    kind: "guard",
+    symbol: "⌂",
+    description: "使一名友方获得 4 点护盾，并移除其破绽",
+    target: "ally",
+    tone: "#3f6f86",
+    effects: [
+      { kind: "block", amount: 4, target: "chosen" },
+      { kind: "cleanse", statuses: ["exposed"], target: "chosen" },
+    ],
+  },
+  emberwind: {
+    id: "emberwind",
+    name: "烬风",
+    kind: "tactic",
+    symbol: "≈",
+    description: "造成 2 点伤害，并施加一回合灼烧",
+    target: "enemy",
+    tone: "#c25a3c",
+    effects: [
+      { kind: "damage", amount: 2, target: "chosen" },
+      { kind: "apply-status", status: "burning", duration: 1, target: "chosen" },
+    ],
+  },
+  rally: {
+    id: "rally",
+    name: "振鼓",
+    kind: "tactic",
+    symbol: "◈",
+    description: "使一名友方获得 2 点护盾与蓄势",
+    target: "ally",
+    tone: "#5b8a72",
+    effects: [
+      { kind: "block", amount: 2, target: "chosen" },
+      { kind: "apply-status", status: "tempered", target: "chosen" },
+    ],
+  },
 };
 
+// 每套牌 14 张，牌组构成要能被角色被动读出来：
+// 炉心堆护盾、余辉堆治疗、破城堆压制、猎火堆灼烧。
 const DECK_RECIPES: Record<string, readonly string[]> = {
   player: [
     "sever", "sever", "sever", "sever",
     "plate", "plate", "plate", "rekindle",
-    "fracture", "fracture", "temper", "temper", "temper", "refine",
+    "fracture", "fracture", "temper", "temper",
+    "aegis", "aegis",
   ],
   luna: [
-    "sever", "sever", "plate", "plate", "plate",
+    "sever", "sever", "plate", "plate",
     "rekindle", "rekindle", "rekindle", "rekindle",
-    "fracture", "temper", "refine", "refine", "refine",
+    "refine", "refine", "refine", "temper",
+    "rally", "rally",
   ],
   scar: [
-    "sever", "sever", "sever", "sever", "plate", "plate", "plate",
-    "rekindle", "fracture", "fracture", "fracture", "fracture", "temper", "temper",
+    "sever", "sever", "sever", "sever", "plate", "plate",
+    "fracture", "fracture", "fracture",
+    "siphon", "siphon", "siphon", "temper", "temper",
   ],
   ember: [
-    "sever", "sever", "sever", "sever", "plate", "plate", "rekindle", "fracture",
-    "cinder", "cinder", "cinder", "cinder", "temper", "temper",
+    "sever", "sever", "sever", "plate", "plate",
+    "cinder", "cinder", "cinder",
+    "emberwind", "emberwind", "emberwind",
+    "fracture", "temper", "temper",
   ],
 };
 
@@ -185,10 +244,11 @@ export const COMBATANT_SEEDS: ReadonlyArray<
 > = [
   {
     id: "player",
-    displayName: "你",
+    // 四人都有本名：出战角色可选之后，「你」不再固定属于这个座位。
+    displayName: "初焰",
     controller: "human",
     title: "晨铸先锋",
-    monogram: "铸",
+    monogram: "焰",
     team: "dawn",
     passiveId: "furnace-heart",
     maxHp: 24,

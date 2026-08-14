@@ -84,12 +84,22 @@ function appendEvent(state: TwentyOneState, nextEvent: TableEvent): TwentyOneSta
   };
 }
 
+export const STARTING_CHIPS = 500;
+export const BET_STEPS: readonly number[] = [10, 25, 50, 100];
+/** 牌靴低于这个张数就换新的，保证一手牌不会把牌靴抽空。 */
+const RESHUFFLE_BELOW = 20;
+
+/**
+ * `returnRate` 是连本带利退回的倍率：输 0、和 1、赢 2、Blackjack 2.5（3:2）。
+ */
 function settle(
   state: TwentyOneState,
   outcome: TwentyOneOutcome,
   reason: string,
   text: string,
+  returnRate: number,
 ): TwentyOneState {
+  const returned = Math.floor(state.bet * returnRate);
   const nextEvent = event(state.revision + 1, "table", "settle", text);
   return appendEvent({
     ...state,
@@ -97,24 +107,54 @@ function settle(
     dealerRevealed: true,
     outcome,
     reason,
+    chips: state.chips + returned,
+    payout: returned - state.bet,
   }, nextEvent);
 }
 
 function compareHands(state: TwentyOneState): TwentyOneState {
   const player = evaluateHand(state.playerHand);
   const dealer = evaluateHand(state.dealerHand);
-  if (dealer.busted) return settle(state, "player", "庄家爆牌", "庄家超过二十一点，你赢得本局。");
-  if (player.total > dealer.total) return settle(state, "player", "点数领先", `${player.total} 对 ${dealer.total}，你更接近二十一点。`);
-  if (dealer.total > player.total) return settle(state, "dealer", "庄家领先", `${dealer.total} 对 ${player.total}，庄家赢得本局。`);
-  return settle(state, "push", "点数相同", `双方同为 ${player.total} 点，本局和牌。`);
+  if (dealer.busted) return settle(state, "player", "庄家爆牌", "庄家超过二十一点，你赢得本手。", 2);
+  if (player.total > dealer.total) return settle(state, "player", "点数领先", `${player.total} 对 ${dealer.total}，你更接近二十一点。`, 2);
+  if (dealer.total > player.total) return settle(state, "dealer", "庄家领先", `${dealer.total} 对 ${player.total}，庄家赢得本手。`, 0);
+  return settle(state, "push", "点数相同", `双方同为 ${player.total} 点，本手和牌。`, 1);
 }
 
 export function createInitialState(random: () => number = Math.random): TwentyOneState {
-  let deck: readonly PlayingCard[] = shuffled(createDeck(), random);
+  return {
+    revision: 0,
+    phase: "betting",
+    deck: shuffled(createDeck(), random),
+    playerHand: [],
+    dealerHand: [],
+    dealerRevealed: false,
+    chips: STARTING_CHIPS,
+    bet: 0,
+    doubled: false,
+    handNumber: 1,
+    log: [event(0, "table", "deal", "牌靴已洗好。先决定这一手压多少。")],
+  };
+}
+
+export function availableBets(state: TwentyOneState): readonly number[] {
+  return BET_STEPS.filter((amount) => amount <= state.chips);
+}
+
+/** 下注即发牌：两张明牌给你，庄家一明一暗。 */
+export function placeBet(
+  state: TwentyOneState,
+  amount: number,
+  random: () => number = Math.random,
+): TwentyOneState {
+  if (state.phase !== "betting" || amount <= 0 || amount > state.chips) return state;
+
+  let deck: readonly PlayingCard[] = state.deck.length < RESHUFFLE_BELOW
+    ? shuffled(createDeck(), random)
+    : state.deck;
   const playerHand: PlayingCard[] = [];
   const dealerHand: PlayingCard[] = [];
-
-  for (let deal = 0; deal < 2; deal += 1) {
+  for (let round = 0; round < 2; round += 1) {
     const playerDraw = draw(deck);
     playerHand.push(playerDraw.card);
     deck = playerDraw.deck;
@@ -123,22 +163,75 @@ export function createInitialState(random: () => number = Math.random): TwentyOn
     deck = dealerDraw.deck;
   }
 
-  const base: TwentyOneState = {
-    revision: 0,
+  const base = appendEvent({
+    ...state,
     phase: "player-turn",
     deck,
     playerHand,
     dealerHand,
     dealerRevealed: false,
-    log: [event(0, "table", "deal", "牌桌就绪。先观察点数，再决定是否要牌。")],
-  };
+    outcome: undefined,
+    reason: undefined,
+    payout: undefined,
+    doubled: false,
+    bet: amount,
+    chips: state.chips - amount,
+  }, event(state.revision + 1, "player", "bet", `你压下 ${amount} 枚筹码。`));
 
   const player = evaluateHand(playerHand);
   const dealer = evaluateHand(dealerHand);
-  if (player.blackjack && dealer.blackjack) return settle(base, "push", "双方 Blackjack", "双方均以两张牌达到二十一点，本局和牌。");
-  if (player.blackjack) return settle(base, "player", "Blackjack", "两张牌正好二十一点，你赢得本局。");
-  if (dealer.blackjack) return settle(base, "dealer", "庄家 Blackjack", "庄家以两张牌达到二十一点。");
+  if (player.blackjack && dealer.blackjack) return settle(base, "push", "双方 Blackjack", "双方均以两张牌达到二十一点，本手和牌。", 1);
+  if (player.blackjack) return settle(base, "player", "Blackjack", "两张牌正好二十一点，按 3:2 赔付。", 2.5);
+  if (dealer.blackjack) return settle(base, "dealer", "庄家 Blackjack", "庄家以两张牌达到二十一点。", 0);
   return base;
+}
+
+export function canDouble(state: TwentyOneState): boolean {
+  return state.phase === "player-turn"
+    && state.playerHand.length === 2
+    && !state.doubled
+    && state.chips >= state.bet;
+}
+
+/** 加倍：再压等额筹码，只补一张，然后强制停牌。 */
+export function playerDouble(state: TwentyOneState): TwentyOneState {
+  if (!canDouble(state)) return state;
+  const nextDraw = draw(state.deck);
+  const playerHand = [...state.playerHand, nextDraw.card];
+  const value = evaluateHand(playerHand);
+  const doubled = appendEvent({
+    ...state,
+    deck: nextDraw.deck,
+    playerHand,
+    bet: state.bet * 2,
+    chips: state.chips - state.bet,
+    doubled: true,
+  }, event(state.revision + 1, "player", "double", `你加倍并取得「${nextDraw.card.name}」。`, nextDraw.card));
+
+  if (value.busted) return settle(doubled, "dealer", "你已爆牌", `加倍后点数达到 ${value.total}，超过二十一点。`, 0);
+  return appendEvent(
+    { ...doubled, phase: "dealer-turn", dealerRevealed: true },
+    event(doubled.revision + 1, "player", "stand", "加倍后只补一张，庄家开始行动。"),
+  );
+}
+
+/** 结算后开下一手：保留筹码与牌靴，回到下注阶段。 */
+export function nextHand(state: TwentyOneState): TwentyOneState {
+  if (state.phase !== "settled") return state;
+  const handNumber = state.handNumber + 1;
+  return appendEvent({
+    ...state,
+    phase: "betting",
+    playerHand: [],
+    dealerHand: [],
+    dealerRevealed: false,
+    outcome: undefined,
+    reason: undefined,
+    payout: undefined,
+    bet: 0,
+    doubled: false,
+    handNumber,
+  }, event(state.revision + 1, "table", "deal", `第 ${handNumber} 手。牌靴剩余 ${state.deck.length} 张。`));
 }
 
 export function playerHit(state: TwentyOneState): TwentyOneState {
@@ -149,7 +242,7 @@ export function playerHit(state: TwentyOneState): TwentyOneState {
   const nextEvent = event(state.revision + 1, "player", "hit", `你取得「${nextDraw.card.name}」。`, nextDraw.card);
   const next = appendEvent({ ...state, deck: nextDraw.deck, playerHand }, nextEvent);
 
-  if (value.busted) return settle(next, "dealer", "你已爆牌", `你的点数达到 ${value.total}，超过二十一点。`);
+  if (value.busted) return settle(next, "dealer", "你已爆牌", `你的点数达到 ${value.total}，超过二十一点。`, 0);
   if (value.total === 21) {
     const reveal = event(next.revision + 1, "player", "stand", "你达到二十一点，庄家开始行动。");
     return appendEvent({ ...next, phase: "dealer-turn", dealerRevealed: true }, reveal);

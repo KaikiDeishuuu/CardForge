@@ -13,6 +13,7 @@ import {
   getPlayer,
   passTurn,
   playCards,
+  startNextDeal,
   teamName,
 } from "./domain/engine";
 import type { AiMove, GuandanPlayer, GuandanState, PlayerId } from "./domain/types";
@@ -151,11 +152,21 @@ export function GuandanGame({ onExit }: GameRuntimeProps) {
     cards[nextIndex].focus({ preventScroll: true });
   }
 
+  function clearTurnUi() {
+    setSelectedIds([]);
+    setHintText(undefined);
+  }
+
+  function nextDeal() {
+    setState((current) => startNextDeal(current));
+    clearTurnUi();
+    playSound("card");
+  }
+
   function restart() {
     setState(createInitialState());
-    setSelectedIds([]);
     setAutoPilot(false);
-    setHintText(undefined);
+    clearTurnUi();
     playSound("card");
   }
 
@@ -164,6 +175,9 @@ export function GuandanGame({ onExit }: GameRuntimeProps) {
     : state.lastAction?.text ?? "等待出牌。";
   const opposingPlayers = state.players.filter((player) => player.id === "east" || player.id === "west");
   const partner = getPlayer(state, "partner");
+  const match = state.match;
+  const dealResult = match.lastResult;
+  const champion = match.champion;
   const resultWon = state.winner === human.team;
   const rulesModalRef = useModalFocus({
     active: showRules,
@@ -181,7 +195,7 @@ export function GuandanGame({ onExit }: GameRuntimeProps) {
         <button type="button" className="gd-round-button" onClick={onExit} aria-label="返回游戏大厅">←</button>
         <div className="guandan-title">
           <small>CARDFORGE · TABLE 003</small>
-          <strong>掼蛋 · 入门局</strong>
+          <strong>掼蛋 · 升级赛</strong>
         </div>
         <div className="guandan-tools">
           <button type="button" onClick={() => setShowRules(true)} aria-label="查看规则">?</button>
@@ -190,10 +204,22 @@ export function GuandanGame({ onExit }: GameRuntimeProps) {
         </div>
       </header>
 
-      <div className="gd-level-rail" aria-label={`本局级牌为 ${state.levelRank}`}>
-        <span>本局级牌</span>
+      <div
+        className="gd-level-rail"
+        aria-label={`第 ${match.dealNumber} 局，打 ${teamName(match.attackingTeam)}的 ${state.levelRank}。朱雀方 ${match.levels.vermillion} 级，青岳方 ${match.levels.indigo} 级`}
+      >
+        <span>第 {match.dealNumber} 局 · 逢人配 ♥{state.levelRank}</span>
         <div>{NUMBER_RANKS.map((rank) => <i key={rank} className={rank === state.levelRank ? "is-level" : ""}>{rank}</i>)}</div>
-        <strong>逢人配 · ♥{state.levelRank}</strong>
+        <strong className="gd-match-score">
+          {(["vermillion", "indigo"] as const).map((team) => (
+            <b
+              key={team}
+              className={`gd-match-score__team gd-match-score__team--${team} ${match.attackingTeam === team ? "is-attacking" : ""}`}
+            >
+              {team === "vermillion" ? "朱" : "青"}<i>{match.levels[team]}</i>
+            </b>
+          ))}
+        </strong>
       </div>
 
       <section className="gd-arena" aria-label="四人掼蛋牌桌">
@@ -275,7 +301,7 @@ export function GuandanGame({ onExit }: GameRuntimeProps) {
         <div ref={rulesModalRef} className="gd-modal" role="dialog" aria-modal="true" aria-labelledby="gd-rules-title" tabIndex={-1}>
           <div className="gd-rule-board">
             <button type="button" className="gd-rule-board__close" onClick={() => setShowRules(false)} aria-label="关闭规则">×</button>
-            <span className="gd-rule-board__ribbon">入门局</span>
+            <span className="gd-rule-board__ribbon">升级赛</span>
             <small>四人 · 对家 · 双副牌</small>
             <h2 id="gd-rules-title">不是一个人跑得快，<br />是两个人走得远。</h2>
             <p>你与上方对家同队。轮流打出同型且更大的牌；其余三家都过牌后，由上一手玩家重新领出。</p>
@@ -283,25 +309,55 @@ export function GuandanGame({ onExit }: GameRuntimeProps) {
               <span><b>单 / 对 / 三</b><i>同牌型比点数</i></span>
               <span><b>三带二 / 五张顺</b><i>按三张或顺子顶张比较</i></span>
               <span><b>四张起炸</b><i>可压普通牌型，张数优先</i></span>
-              <span><b>红心 2</b><i>本局百搭“逢人配”</i></span>
+              <span><b>红心 {state.levelRank}</b><i>本局百搭“逢人配”</i></span>
             </div>
-            <p className="gd-rule-board__scope">首版暂不包含进贡还贡、连续升级、木板/钢板和同花顺炸弹。</p>
+            <p>
+              升级看头游那一队：队友第 2 名升 3 级，第 3 名升 2 级，第 4 名升 1 级。
+              双方各自从 2 起打，先在 A 上再赢一局的一方打过 A，赢下整场。
+            </p>
+            <p className="gd-rule-board__scope">暂不包含进贡还贡、木板/钢板和同花顺炸弹。</p>
             <button type="button" className="gd-rule-board__enter" onClick={() => { setShowRules(false); playSound("card"); }}>入席开牌 <span>→</span></button>
           </div>
         </div>
       )}
 
-      {state.status === "finished" && state.winner && !showRules && (
+      {state.status === "finished" && state.winner && dealResult && !showRules && (
         <div ref={resultModalRef} className="gd-modal gd-modal--result" role="dialog" aria-modal="true" aria-labelledby="gd-result-title" tabIndex={-1}>
           <div className={`gd-result-board gd-result-board--${state.winner}`}>
             <span className="gd-result-board__seal" aria-hidden="true">{resultWon ? "贯" : "再"}</span>
-            <small>{teamName(state.winner)}完成牌局</small>
-            <h2 id="gd-result-title">{resultWon ? "对家同心，先行收官" : "青岳方抢先收官"}</h2>
-            <p>{resultWon ? "你和对家都已出完手牌。配合比一手大牌更重要。" : "这一局对手的接力更顺。用提示或托管观察下一次节奏。"}</p>
+            <small>
+              {champion ? "整场结束" : `第 ${match.dealNumber} 局 · ${teamName(state.winner)}获胜`}
+            </small>
+            <h2 id="gd-result-title">
+              {champion
+                ? (resultWon ? "打过 A，赢下整场" : "对手先打过了 A")
+                : (dealResult.partnerPlace <= 2
+                  ? (resultWon ? "双下，直升三级" : "被对手双下")
+                  : (resultWon ? "拿下本局" : "本局失守"))}
+            </h2>
+
+            <div className="gd-level-gain">
+              <span><small>{teamName(dealResult.winner)}</small><b>{dealResult.fromLevel}</b></span>
+              <i aria-hidden="true">→</i>
+              <span className="is-target"><small>升 {dealResult.gained} 级</small><b>{dealResult.toLevel}</b></span>
+            </div>
+
+            <p>
+              {champion
+                ? (resultWon ? "从 2 一路打到 A，这一场收官。" : "对手率先打过 A。再来一场，换个节奏。")
+                : `头游${getPlayer(state, dealResult.finishOrder[0]).displayName}，队友第 ${dealResult.partnerPlace} 名。下一局由头游先领出。`}
+            </p>
+
             <div className="gd-finish-order">
               {state.finishOrder.map((id, index) => <span key={id}><b>{index + 1}</b>{getPlayer(state, id).displayName}</span>)}
             </div>
-            <footer><button type="button" onClick={restart}>再开一局</button><button type="button" onClick={onExit}>返回大厅</button></footer>
+
+            <footer>
+              {champion
+                ? <button type="button" onClick={restart}>再来一场</button>
+                : <button type="button" onClick={nextDeal}>下一局 <span aria-hidden="true">→</span></button>}
+              <button type="button" onClick={onExit}>返回大厅</button>
+            </footer>
           </div>
         </div>
       )}

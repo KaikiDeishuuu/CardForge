@@ -5,11 +5,14 @@ import { useModalFocus } from "../../../shared/ui/useModalFocus";
 
 interface TacticalBriefProps {
   combatants: readonly Combatant[];
+  selectedId: string;
+  onSelect: (id: string) => void;
   onClose: () => void;
 }
 
-export function TacticalBrief({ combatants, onClose }: TacticalBriefProps) {
+export function TacticalBrief({ combatants, selectedId, onSelect, onClose }: TacticalBriefProps) {
   const modalRef = useModalFocus({ active: true, initialFocus: ".ledger-enter", onDismiss: onClose });
+  const chosen = combatants.find((combatant) => combatant.id === selectedId);
 
   return (
     <div ref={modalRef} className="ledger-overlay" role="dialog" aria-modal="true" aria-labelledby="brief-title" tabIndex={-1}>
@@ -24,23 +27,32 @@ export function TacticalBrief({ combatants, onClose }: TacticalBriefProps) {
         </header>
 
         <p className="ledger-intro">
-          四名角色各自携带一套牌与一项被动。每回合只能打出一张牌，状态和行动顺序比单次伤害更重要。
+          四名角色各自携带一套牌与一项被动。选一个出战，其余三人交给 AI；每回合只能打出一张牌，状态和行动顺序比单次伤害更重要。
         </p>
 
         <div className="ledger-section">
-          <h3>角色炉印</h3>
-          <div className="passive-grid">
+          <h3>选择出战角色</h3>
+          <div className="passive-grid" role="radiogroup" aria-label="选择出战角色">
             {combatants.map((combatant) => {
               const passive = PASSIVE_CATALOG[combatant.passiveId];
+              const isChosen = combatant.id === selectedId;
               return (
-                <article key={combatant.id} className={`passive-note team-${combatant.team}`}>
+                <button
+                  type="button"
+                  key={combatant.id}
+                  role="radio"
+                  aria-checked={isChosen}
+                  className={`passive-note team-${combatant.team} ${isChosen ? "is-chosen" : ""}`}
+                  onClick={() => onSelect(combatant.id)}
+                >
                   <span>{combatant.monogram}</span>
                   <div>
                     <small>{combatant.displayName} · {combatant.title}</small>
                     <strong>{passive.name}</strong>
                     <p>{passive.description}</p>
                   </div>
-                </article>
+                  {isChosen && <b className="passive-note__pick">出战</b>}
+                </button>
               );
             })}
           </div>
@@ -65,7 +77,7 @@ export function TacticalBrief({ combatants, onClose }: TacticalBriefProps) {
         </div>
 
         <button type="button" className="ledger-enter" onClick={onClose}>
-          点亮熔炉
+          以{chosen?.displayName ?? "晨铸先锋"}的身份点亮熔炉
         </button>
       </section>
     </div>
