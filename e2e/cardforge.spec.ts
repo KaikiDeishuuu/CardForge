@@ -361,6 +361,7 @@ test("定鼎身份局可以入席并展示四席暗局", async ({ page }) => {
   await expect(rules).toBeVisible();
   await expect(rules.getByText("无懈", { exact: true })).toBeVisible();
   await expect(rules.getByText("约斗", { exact: true })).toBeVisible();
+  await expect(rules.getByText("武将", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "关闭规则" }).click();
   assertNoPageErrors();
 });
