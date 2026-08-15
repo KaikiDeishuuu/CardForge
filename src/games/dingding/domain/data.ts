@@ -70,6 +70,15 @@ export const CARD_CATALOG: Readonly<Record<string, DingCard>> = {
     tone: "#8d4b63",
     description: "出牌阶段对距离 1 的一名其他角色使用，随机获得其一张手牌。",
   },
+  nullify: {
+    id: "nullify",
+    name: "无懈可击",
+    kind: "trick",
+    type: "nullify",
+    symbol: "⊕",
+    tone: "#6b5b8e",
+    description: "响应一张锦囊牌时使用，抵消其效果；「无懈可击」本身也可以被另一张「无懈可击」反制。",
+  },
   longblade: {
     id: "longblade",
     name: "长锋",
@@ -112,8 +121,8 @@ export const CARD_CATALOG: Readonly<Record<string, DingCard>> = {
 };
 
 /**
- * M0 骨架牌堆：只包含刺击/闪避/疗元、两张即时锦囊和四件距离装备。
- * 后续里程碑再加入决斗、无懈、群体锦囊与延时锦囊。
+ * M1 牌堆：基础牌之外加入即时锦囊与三张「无懈可击」。
+ * 后续里程碑再加入决斗、群体锦囊与延时锦囊。
  */
 const DECK_RECIPE: readonly (keyof typeof CARD_CATALOG)[] = [
   "strike", "strike", "strike", "strike", "strike",
@@ -127,6 +136,7 @@ const DECK_RECIPE: readonly (keyof typeof CARD_CATALOG)[] = [
   "focus", "focus", "focus",
   "dismantle", "dismantle", "dismantle", "dismantle",
   "snatch", "snatch", "snatch", "snatch",
+  "nullify", "nullify", "nullify",
   "longblade", "longblade",
   "repeater", "repeater",
   "swift", "swift",

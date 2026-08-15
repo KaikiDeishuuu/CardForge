@@ -6,11 +6,15 @@ import type {
   DingState,
   EquipmentSlot,
   LastDingAction,
-  PendingAction,
   PlayerId,
+  ResolutionFrame,
 } from "./types";
 
-export const DING_SAVE_SCHEMA_VERSION = 1;
+/**
+ * v2：`pending` 单值升级为 `stack` 结算栈，并加入「无懈可击」。
+ * v1 存档没有栈结构，不猜测迁移，按不可读处理（平台不会覆盖它）。
+ */
+export const DING_SAVE_SCHEMA_VERSION = 2;
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -19,9 +23,11 @@ const IDENTITIES = new Set<string>(["lord", "loyalist", "rebel", "renegade"]);
 const PHASES = new Set<string>(["prepare", "draw", "play", "discard", "finished"]);
 const CARD_KINDS = new Set<string>(["basic", "trick", "equipment"]);
 const CARD_TYPES = new Set<string>([
-  "strike", "evade", "salve", "focus", "dismantle", "snatch",
+  "strike", "evade", "salve",
+  "focus", "dismantle", "snatch", "nullify",
   "weapon", "minus-horse", "plus-horse",
 ]);
+const TRICK_TYPES = new Set<string>(["focus", "dismantle", "snatch", "nullify"]);
 const SLOTS: readonly EquipmentSlot[] = ["weapon", "minusHorse", "plusHorse"];
 
 function isRecord(value: unknown): value is UnknownRecord {
@@ -34,6 +40,10 @@ function isNonNegativeInteger(value: unknown): value is number {
 
 function isPositiveInteger(value: unknown): value is number {
   return isNonNegativeInteger(value) && value > 0;
+}
+
+function isPlayerId(value: unknown): value is PlayerId {
+  return typeof value === "string" && PLAYER_IDS.has(value);
 }
 
 function isCard(value: unknown): value is DingCard {
@@ -68,7 +78,7 @@ function isEquipment(value: unknown): boolean {
 
 function isPlayer(value: unknown): value is DingPlayer {
   if (!isRecord(value)
-    || typeof value.id !== "string" || !PLAYER_IDS.has(value.id)
+    || !isPlayerId(value.id)
     || typeof value.displayName !== "string"
     || (value.controller !== "human" && value.controller !== "ai")
     || !isNonNegativeInteger(value.seat) || value.seat >= 4
@@ -97,21 +107,43 @@ function isLastAction(value: unknown): value is LastDingAction {
     || (Array.isArray(value.cardIds) && value.cardIds.every((id) => typeof id === "string"));
 }
 
-function isPending(value: unknown): value is PendingAction {
+function isIdList(value: unknown): value is readonly PlayerId[] {
+  return Array.isArray(value)
+    && value.length > 0
+    && value.length <= 4
+    && value.every(isPlayerId)
+    && new Set(value).size === value.length;
+}
+
+function isFrame(value: unknown): value is ResolutionFrame {
   if (!isRecord(value)) return false;
   if (value.kind === "strike") {
-    return typeof value.actorId === "string" && PLAYER_IDS.has(value.actorId)
-      && typeof value.targetId === "string" && PLAYER_IDS.has(value.targetId)
+    return isPlayerId(value.actorId)
+      && isPlayerId(value.targetId)
       && typeof value.cardUid === "string"
       && value.damage === 1;
   }
   if (value.kind === "dying") {
-    return typeof value.targetId === "string" && PLAYER_IDS.has(value.targetId)
+    return isPlayerId(value.targetId)
       && isPositiveInteger(value.required)
       && isNonNegativeInteger(value.offered)
-      && Array.isArray(value.responders) && value.responders.every((id) => typeof id === "string" && PLAYER_IDS.has(id))
-      && isNonNegativeInteger(value.cursor)
-      && (value.sourceId === undefined || (typeof value.sourceId === "string" && PLAYER_IDS.has(value.sourceId)));
+      && isIdList(value.responders)
+      && isNonNegativeInteger(value.cursor) && value.cursor < value.responders.length
+      && (value.sourceId === undefined || isPlayerId(value.sourceId));
+  }
+  if (value.kind === "trick") {
+    if (!isPositiveInteger(value.frameId)
+      || !isPlayerId(value.actorId)
+      || typeof value.cardUid !== "string"
+      || typeof value.cardType !== "string" || !TRICK_TYPES.has(value.cardType)
+      || (value.targetId !== undefined && !isPlayerId(value.targetId))
+      || (value.counterFrameId !== undefined && !isPositiveInteger(value.counterFrameId))
+      || !isIdList(value.responders)
+      || !isNonNegativeInteger(value.cursor) || value.cursor >= value.responders.length
+      || typeof value.awaitingResponse !== "boolean"
+      || (value.negated !== undefined && typeof value.negated !== "boolean")) return false;
+    if (value.negated === true && value.awaitingResponse === true) return false;
+    return true;
   }
   return false;
 }
@@ -120,18 +152,44 @@ function cardUids(piles: readonly (readonly DingCard[])[]): string[] {
   return piles.flat().map((card) => card.id);
 }
 
+function validateStack(data: UnknownRecord, discard: readonly DingCard[]): boolean {
+  if (!Array.isArray(data.stack) || !data.stack.every(isFrame)) return false;
+  const stack = data.stack as unknown as readonly ResolutionFrame[];
+  const trickFrames = stack.filter((frame): frame is Extract<ResolutionFrame, { kind: "trick" }> => frame.kind === "trick");
+  const frameIds = trickFrames.map((frame) => frame.frameId);
+  if (new Set(frameIds).size !== frameIds.length) return false;
+
+  for (const frame of stack) {
+    if (frame.kind === "trick") {
+      if (frame.counterFrameId !== undefined && !frameIds.includes(frame.counterFrameId)) return false;
+      if (frame.negated === true && frame.awaitingResponse === true) return false;
+    }
+    if (frame.kind === "strike" || frame.kind === "trick") {
+      const played = discard.find((card) => card.id === frame.cardUid);
+      if (!played) return false;
+      if (frame.kind === "trick" && played.type !== frame.cardType) return false;
+    }
+    if (frame.kind === "strike" || frame.kind === "dying") {
+      if (!(data.players as unknown as DingPlayer[]).find((player) => player.id === frame.targetId)?.alive) return false;
+    } else if (!frame.responders.every((id) => (data.players as unknown as DingPlayer[]).find((player) => player.id === id)?.alive)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function validateState(data: unknown): data is DingState {
   if (!isRecord(data)
     || !isNonNegativeInteger(data.revision)
     || (data.status !== "playing" && data.status !== "finished")
     || typeof data.phase !== "string" || !PHASES.has(data.phase)
     || !isNonNegativeInteger(data.turnNumber) || data.turnNumber < 1
-    || typeof data.activePlayerId !== "string" || !PLAYER_IDS.has(data.activePlayerId)
+    || !isPlayerId(data.activePlayerId)
     || !Array.isArray(data.players) || data.players.length !== 4 || !data.players.every(isPlayer)
     || !isCardList(data.deck)
     || !isCardList(data.discard)
     || typeof data.strikeUsed !== "boolean"
-    || (data.pending !== undefined && !isPending(data.pending))
+    || !Array.isArray(data.stack)
     || (data.lastAction !== undefined && !isLastAction(data.lastAction))
     || !Array.isArray(data.log) || !data.log.every(isLogEntry)
     || !isNonNegativeInteger(data.rngSeed) || data.rngSeed > 0xffff_ffff) return false;
@@ -148,8 +206,10 @@ function validateState(data: unknown): data is DingState {
   const active = getPlayer(players, data.activePlayerId as PlayerId);
   if (!active.alive && data.status === "playing") return false;
 
+  if (!validateStack(data, data.discard as unknown as readonly DingCard[])) return false;
+
   if (data.status === "finished") {
-    if (data.phase !== "finished" || data.pending !== undefined) return false;
+    if (data.phase !== "finished" || (data.stack as unknown as readonly ResolutionFrame[]).length !== 0) return false;
     if (data.winner !== "lord-side" && data.winner !== "rebel" && data.winner !== "renegade") return false;
   } else if (data.winner !== undefined) return false;
 

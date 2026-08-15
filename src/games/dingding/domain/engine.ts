@@ -8,9 +8,11 @@ import type {
   IdentityId,
   LastDingAction,
   MatchWinner,
-  PendingAction,
   PendingDying,
+  PendingTrick,
   PlayerId,
+  ResolutionFrame,
+  TrickCardType,
 } from "./types";
 
 export const DRAW_PER_TURN = 2;
@@ -80,6 +82,10 @@ function appendLog(log: readonly DingLogEntry[], texts: readonly string[], revis
   return [...log, ...texts.map((text, index) => ({ id: revision * 100 + index, text }))].slice(-24);
 }
 
+function topFrame(stack: readonly ResolutionFrame[]): ResolutionFrame | undefined {
+  return stack.at(-1);
+}
+
 function withAction(
   state: DingState,
   actorId: PlayerId | "table",
@@ -87,16 +93,19 @@ function withAction(
   next: Partial<DingState>,
 ): DingState {
   const revision = state.revision + 1;
+  const stack = next.stack ?? state.stack;
+  const top = topFrame(stack);
   const lastAction: LastDingAction = {
     revision,
     actorId,
     text: texts.at(-1) ?? "",
-    ...(next.pending?.kind === "strike" ? { cardIds: [next.pending.cardUid] } : {}),
+    ...(top && "cardUid" in top ? { cardIds: [top.cardUid] } : {}),
   };
   return {
     ...state,
     ...next,
     revision,
+    stack,
     lastAction,
     log: appendLog(state.log, texts, revision),
   };
@@ -150,6 +159,33 @@ function cardType(card: DingCard): DingCard["type"] {
   return card.type;
 }
 
+function cardNameInPile(pile: readonly DingCard[], cardUid: string): string {
+  return pile.find((card) => card.id === cardUid)?.name ?? "锦囊";
+}
+
+function createTrickFrame(
+  frameId: number,
+  actorId: PlayerId,
+  cardUid: string,
+  cardType: TrickCardType,
+  targetId: PlayerId | undefined,
+  players: readonly DingPlayer[],
+  counterFrameId?: number,
+): PendingTrick {
+  return {
+    kind: "trick",
+    frameId,
+    actorId,
+    cardUid,
+    cardType,
+    targetId,
+    counterFrameId,
+    responders: aliveOrderFrom(players, actorId),
+    cursor: 0,
+    awaitingResponse: true,
+  };
+}
+
 export function createInitialState(random: () => number = Math.random): DingState {
   const deck = shuffled(buildDeck(), random);
   let rngSeed = Math.floor(random() * 2_147_483_647) || 1;
@@ -197,6 +233,7 @@ export function createInitialState(random: () => number = Math.random): DingStat
     deck: nextDeck,
     discard: nextDiscard,
     strikeUsed: false,
+    stack: [],
     log: [{ id: 0, text: `四席就位。${lord.displayName}是主君，率先行动。` }],
     rngSeed,
   };
@@ -204,13 +241,13 @@ export function createInitialState(random: () => number = Math.random): DingStat
 
 export function getPlayableCards(state: DingState, actorId: PlayerId): DingCard[] {
   const actor = getPlayer(state.players, actorId);
-  if (state.status !== "playing" || state.phase !== "play" || state.pending || state.activePlayerId !== actorId) return [];
+  if (state.status !== "playing" || state.phase !== "play" || state.stack.length > 0 || state.activePlayerId !== actorId) return [];
   return actor.hand.filter((card) => getTargetOptions(state, actorId, card).length > 0);
 }
 
 export function getTargetOptions(state: DingState, actorId: PlayerId, card: DingCard): readonly PlayerId[] {
   const actor = getPlayer(state.players, actorId);
-  if (state.status !== "playing" || state.phase !== "play" || state.pending || state.activePlayerId !== actorId) return [];
+  if (state.status !== "playing" || state.phase !== "play" || state.stack.length > 0 || state.activePlayerId !== actorId) return [];
   if (!actor.hand.some((entry) => entry.id === card.id)) return [];
 
   switch (cardType(card)) {
@@ -240,6 +277,7 @@ export function getTargetOptions(state: DingState, actorId: PlayerId, card: Ding
     case "plus-horse":
       return !actor.equipment.plusHorse ? [actor.id] : [];
     case "evade":
+    case "nullify":
       return [];
   }
 }
@@ -268,7 +306,7 @@ function equipCard(player: DingPlayer, card: DingCard): { player: DingPlayer; di
 }
 
 export function playCard(state: DingState, actorId: PlayerId, cardUid: string, targetId?: PlayerId): DingState {
-  if (state.status !== "playing" || state.phase !== "play" || state.pending || state.activePlayerId !== actorId) return state;
+  if (state.status !== "playing" || state.phase !== "play" || state.stack.length > 0 || state.activePlayerId !== actorId) return state;
   const actor = getPlayer(state.players, actorId);
   const card = actor.hand.find((entry) => entry.id === cardUid);
   if (!card) return state;
@@ -278,10 +316,10 @@ export function playCard(state: DingState, actorId: PlayerId, cardUid: string, t
     ...player,
     hand: player.hand.filter((entry) => entry.id !== cardUid),
   }));
-  let deck = state.deck;
+  const deck = state.deck;
   let discard = [...state.discard];
-  let rngSeed = state.rngSeed;
-  let pending: PendingAction | undefined = undefined;
+  const rngSeed = state.rngSeed;
+  let stack: ResolutionFrame[] = [];
   let strikeUsed = state.strikeUsed;
   const texts = [`${actor.displayName}打出「${card.name}」。`];
 
@@ -289,7 +327,7 @@ export function playCard(state: DingState, actorId: PlayerId, cardUid: string, t
     case "strike": {
       if (!targetId) return state;
       const target = getPlayer(players, targetId);
-      pending = { kind: "strike", actorId, targetId, cardUid, damage: 1 };
+      stack = [{ kind: "strike", actorId, targetId, cardUid, damage: 1 }];
       strikeUsed = true;
       discard = [...discard, card];
       texts.push(`${target.displayName}可以打出「闪避」响应。`);
@@ -304,52 +342,18 @@ export function playCard(state: DingState, actorId: PlayerId, cardUid: string, t
       texts.push(`${actor.displayName}回复 1 点体力。`);
       break;
     }
-    case "focus": {
-      discard = [...discard, card];
-      const drawn: DingCard[] = [];
-      for (let count = 0; count < 2; count += 1) {
-        const draw = drawOne(deck, discard, rngSeed);
-        deck = draw.deck;
-        discard = draw.discard;
-        rngSeed = draw.seed;
-        if (draw.card) drawn.push(draw.card);
-      }
-      players = replacePlayer(players, actorId, (player) => ({
-        ...player,
-        hand: [...player.hand, ...drawn],
-      }));
-      texts.push(`${actor.displayName}摸 ${drawn.length} 张牌。`);
-      break;
-    }
-    case "dismantle": {
-      if (!targetId) return state;
-      const target = getPlayer(players, targetId);
-      discard = [...discard, card];
-      const taken = takeRandomHandCard(target.hand, rngSeed);
-      rngSeed = taken.seed;
-      if (taken.card) {
-        players = replacePlayer(players, targetId, (player) => ({
-          ...player,
-          hand: taken.hand,
-        }));
-        discard = [...discard, taken.card];
-        texts.push(`${target.displayName}随机弃置「${taken.card.name}」。`);
-      } else {
-        texts.push(`${target.displayName}没有手牌可拆。`);
-      }
-      break;
-    }
+    case "focus":
+    case "dismantle":
     case "snatch": {
-      if (!targetId) return state;
-      const target = getPlayer(players, targetId);
       discard = [...discard, card];
-      const taken = takeRandomHandCard(target.hand, rngSeed);
-      rngSeed = taken.seed;
-      if (taken.card) {
-        players = replacePlayer(players, targetId, (player) => ({ ...player, hand: taken.hand }));
-        players = replacePlayer(players, actorId, (player) => ({ ...player, hand: [...player.hand, taken.card!] }));
-        texts.push(`${actor.displayName}获得「${taken.card.name}」。`);
-      }
+      const effectTarget = card.type === "focus" ? undefined : targetId;
+      if (card.type !== "focus" && !effectTarget) return state;
+      stack = [createTrickFrame(state.revision + 1, actorId, cardUid, card.type, effectTarget, players)];
+      texts.push(
+        card.type === "focus"
+          ? `${actor.displayName}使用「聚势」，等待无懈可击响应。`
+          : `${actor.displayName}对${getPlayer(players, effectTarget!).displayName}使用「${card.name}」，等待无懈可击响应。`,
+      );
       break;
     }
     case "weapon":
@@ -361,7 +365,8 @@ export function playCard(state: DingState, actorId: PlayerId, cardUid: string, t
       texts.push(equipped.discarded.length > 0 ? `${actor.displayName}更换装备，旧的「${equipped.discarded[0].name}」进入弃牌堆。` : `${actor.displayName}装备「${card.name}」。`);
       break;
     }
-    default:
+    case "evade":
+    case "nullify":
       return state;
   }
 
@@ -370,9 +375,171 @@ export function playCard(state: DingState, actorId: PlayerId, cardUid: string, t
     deck,
     discard,
     rngSeed,
-    pending,
+    stack,
     strikeUsed,
   });
+}
+
+/** 结算一张未被抵消的锦囊帧，并可能把下一段挂起的锦囊一并结清。 */
+function applyTrickEffect(
+  draft: { players: DingPlayer[]; deck: DingCard[]; discard: DingCard[]; rngSeed: number; stack: ResolutionFrame[]; texts: string[] },
+  frame: PendingTrick,
+): void {
+  if (frame.cardType === "nullify") {
+    const targetIndex = draft.stack.findIndex(
+      (entry) => entry.kind === "trick" && entry.frameId === frame.counterFrameId,
+    );
+    if (targetIndex < 0) return;
+    const target = draft.stack[targetIndex] as PendingTrick;
+    draft.stack = draft.stack.map((entry) =>
+      entry.kind === "trick" && entry.frameId === target.frameId ? { ...entry, negated: true } : entry,
+    );
+    draft.texts.push(
+      `${getPlayer(draft.players, frame.actorId).displayName}的「无懈可击」生效，抵消了${getPlayer(draft.players, target.actorId).displayName}的「${cardNameInPile(draft.discard, target.cardUid)}」。`,
+    );
+    return;
+  }
+
+  const actor = getPlayer(draft.players, frame.actorId);
+  const cardName = cardNameInPile(draft.discard, frame.cardUid);
+  if (frame.cardType === "focus") {
+    const drawn: DingCard[] = [];
+    for (let count = 0; count < 2; count += 1) {
+      const draw = drawOne(draft.deck, draft.discard, draft.rngSeed);
+      draft.deck = draw.deck;
+      draft.discard = draw.discard;
+      draft.rngSeed = draw.seed;
+      if (draw.card) drawn.push(draw.card);
+    }
+    draft.players = replacePlayer(draft.players, actor.id, (player) => ({
+      ...player,
+      hand: [...player.hand, ...drawn],
+    }));
+    draft.texts.push(`${actor.displayName}的「聚势」生效，摸 ${drawn.length} 张牌。`);
+    return;
+  }
+
+  if (frame.cardType === "dismantle" && frame.targetId) {
+    const target = getPlayer(draft.players, frame.targetId);
+    if (target.alive && target.hand.length > 0) {
+      const taken = takeRandomHandCard(target.hand, draft.rngSeed);
+      draft.rngSeed = taken.seed;
+      if (taken.card) {
+        draft.players = replacePlayer(draft.players, target.id, (player) => ({ ...player, hand: taken.hand }));
+        draft.discard = [...draft.discard, taken.card];
+        draft.texts.push(`${actor.displayName}的「${cardName}」生效，${target.displayName}弃置「${taken.card.name}」。`);
+      }
+    } else {
+      draft.texts.push(`${actor.displayName}的「${cardName}」生效，但${target.displayName}没有手牌可拆。`);
+    }
+    return;
+  }
+
+  if (frame.cardType === "snatch" && frame.targetId) {
+    const target = getPlayer(draft.players, frame.targetId);
+    if (target.alive && target.hand.length > 0) {
+      const taken = takeRandomHandCard(target.hand, draft.rngSeed);
+      draft.rngSeed = taken.seed;
+      if (taken.card) {
+        draft.players = replacePlayer(draft.players, target.id, (player) => ({ ...player, hand: taken.hand }));
+        draft.players = replacePlayer(draft.players, actor.id, (player) => ({ ...player, hand: [...player.hand, taken.card!] }));
+        draft.texts.push(`${actor.displayName}的「${cardName}」生效，获得${target.displayName}的「${taken.card.name}」。`);
+      }
+    } else {
+      draft.texts.push(`${actor.displayName}的「${cardName}」生效，但${target.displayName}没有手牌可取。`);
+    }
+  }
+}
+
+/**
+ * 从栈顶开始结清所有已就绪的锦囊帧：
+ * 被抵消的帧直接弹出，等待链挂起的帧直接结算，仍在询问的帧停下等待响应。
+ */
+function settleTrickFrames(
+  state: DingState,
+  stack: readonly ResolutionFrame[],
+  texts: readonly string[] = [],
+): DingState {
+  if (state.status !== "playing") return state;
+  const draft = {
+    players: [...state.players],
+    deck: [...state.deck],
+    discard: [...state.discard],
+    rngSeed: state.rngSeed,
+    stack: [...stack],
+    texts: [...texts],
+  };
+  let settled = false;
+  for (;;) {
+    const top = topFrame(draft.stack);
+    if (!top || top.kind !== "trick") break;
+    if (top.awaitingResponse && !top.negated) break;
+    draft.stack = draft.stack.slice(0, -1);
+    settled = true;
+    if (top.negated) {
+      draft.texts.push(
+        `${getPlayer(draft.players, top.actorId).displayName}的「${cardNameInPile(draft.discard, top.cardUid)}」被无懈可击抵消，不生效。`,
+      );
+      continue;
+    }
+    applyTrickEffect(draft, top);
+  }
+  if (!settled && draft.texts.length === 0) return state;
+  return withAction(state, "table", draft.texts, {
+    players: draft.players,
+    deck: draft.deck,
+    discard: draft.discard,
+    rngSeed: draft.rngSeed,
+    stack: draft.stack,
+  });
+}
+
+export function respondToTrick(state: DingState, responderId: PlayerId, cardUid?: string): DingState {
+  const top = topFrame(state.stack);
+  if (state.status !== "playing" || !top || top.kind !== "trick" || !top.awaitingResponse) return state;
+  if (top.responders[top.cursor] !== responderId) return state;
+
+  const responder = getPlayer(state.players, responderId);
+  const card = cardUid ? responder.hand.find((entry) => entry.id === cardUid) : undefined;
+  if (cardUid && card?.type !== "nullify") return state;
+
+  if (card) {
+    const players = replacePlayer(state.players, responderId, (player) => ({
+      ...player,
+      hand: player.hand.filter((entry) => entry.id !== cardUid),
+    }));
+    const discard = [...state.discard, card];
+    const suspended = state.stack.map((entry) =>
+      entry.kind === "trick" && entry.frameId === top.frameId ? { ...entry, awaitingResponse: false } : entry,
+    );
+    const frame = createTrickFrame(
+      state.revision + 1,
+      responderId,
+      card.id,
+      "nullify",
+      undefined,
+      players,
+      top.frameId,
+    );
+    return withAction(state, responderId, [`${responder.displayName}打出「无懈可击」，指向「${cardNameInPile(state.discard, top.cardUid)}」。`], {
+      players,
+      discard,
+      stack: [...suspended, frame],
+    });
+  }
+
+  const nextCursor = top.cursor + 1;
+  if (nextCursor < top.responders.length) {
+    const stack = state.stack.map((entry) =>
+      entry.kind === "trick" && entry.frameId === top.frameId ? { ...entry, cursor: nextCursor } : entry,
+    );
+    return withAction(state, responderId, [`${responder.displayName}不响应「${cardNameInPile(state.discard, top.cardUid)}」。`], { stack });
+  }
+
+  const stack = state.stack.map((entry) =>
+    entry.kind === "trick" && entry.frameId === top.frameId ? { ...entry, awaitingResponse: false } : entry,
+  );
+  return settleTrickFrames(state, stack, [`${responder.displayName}不响应，开始结算「${cardNameInPile(state.discard, top.cardUid)}」。`]);
 }
 
 function damagePlayer(
@@ -390,23 +557,32 @@ function damagePlayer(
     const required = 1 - nextHp;
     const responders = aliveOrderFrom(players, targetId);
     const pending: PendingDying = { kind: "dying", targetId, required, offered: 0, responders, cursor: 0, sourceId };
-    next = withAction(next, "table", [`${target.displayName}进入濒死，需要 ${required} 张「疗元」。`], { pending });
+    next = withAction(next, "table", [`${target.displayName}进入濒死，需要 ${required} 张「疗元」。`], {
+      stack: [...next.stack, pending],
+    });
   }
   return next;
 }
 
-function resolveDeath(state: DingState, targetId: PlayerId, sourceId?: PlayerId): DingState {
+function resolveDeath(state: DingState, targetId: PlayerId, sourceId: PlayerId | undefined, stack: readonly ResolutionFrame[]): DingState {
   const target = getPlayer(state.players, targetId);
+  const equipmentCards = (["weapon", "minusHorse", "plusHorse"] as const)
+    .map((slot) => target.equipment[slot])
+    .filter((card): card is DingCard => Boolean(card));
+  const corpseCards = [...target.hand, ...equipmentCards];
   let players = replacePlayer(state.players, targetId, (player) => ({
     ...player,
     alive: false,
     revealed: true,
     hp: 0,
+    hand: [],
+    equipment: {},
   }));
   const texts = [`${target.displayName}退场，身份是「${IDENTITY_NAMES[target.identity]}」。`];
+  if (corpseCards.length > 0) texts.push(`${target.displayName}的 ${corpseCards.length} 张手牌与装备进入弃牌堆。`);
 
   let deck = state.deck;
-  let discard = state.discard;
+  let discard = [...state.discard, ...corpseCards];
   let rngSeed = state.rngSeed;
   const killer = sourceId ? players.find((player) => player.id === sourceId) : undefined;
   if (killer?.alive && target.identity === "rebel") {
@@ -436,20 +612,21 @@ function resolveDeath(state: DingState, targetId: PlayerId, sourceId?: PlayerId)
       deck,
       discard,
       rngSeed,
-      pending: undefined,
+      stack,
       status: "finished",
       phase: "finished",
       winner,
     });
   }
 
-  return withAction(state, "table", texts, {
+  const resolved = withAction(state, "table", texts, {
     players,
     deck,
     discard,
     rngSeed,
-    pending: undefined,
+    stack,
   });
+  return settleTrickFrames(resolved, resolved.stack);
 }
 
 export function evaluateWinner(players: readonly DingPlayer[]): MatchWinner | undefined {
@@ -475,14 +652,15 @@ function winnerText(winner: MatchWinner): string {
 }
 
 export function respondToStrike(state: DingState, responderId: PlayerId, cardUid?: string): DingState {
-  const pending = state.pending;
-  if (!pending || pending.kind !== "strike" || pending.targetId !== responderId || state.status !== "playing") return state;
+  const pending = topFrame(state.stack);
+  if (state.status !== "playing" || !pending || pending.kind !== "strike" || pending.targetId !== responderId) return state;
   const responder = getPlayer(state.players, responderId);
   const card = cardUid ? responder.hand.find((entry) => entry.id === cardUid) : undefined;
   if (cardUid && card?.type !== "evade") return state;
 
   let players = state.players;
   let discard = state.discard;
+  const stack = state.stack.slice(0, -1);
   const texts: string[] = [];
   if (card) {
     players = replacePlayer(players, responderId, (player) => ({
@@ -493,24 +671,21 @@ export function respondToStrike(state: DingState, responderId: PlayerId, cardUid
     texts.push(`${responder.displayName}打出「闪避」，抵消了刺击。`);
   } else {
     const next = damagePlayer(
-      { ...state, pending: undefined },
+      { ...state, stack },
       pending.targetId,
       pending.damage,
       pending.actorId,
     );
-    if (!cardUid) {
-      texts.push(`${responder.displayName}选择承受这一击。`);
-      return withAction(next, responderId, texts, {});
-    }
+    texts.push(`${responder.displayName}选择承受这一击。`);
+    return withAction(next, responderId, texts, {});
   }
 
-  const cleared = withAction(state, responderId, texts, { players, discard, pending: undefined });
-  return cleared;
+  return withAction(state, responderId, texts, { players, discard, stack });
 }
 
 export function respondToDying(state: DingState, responderId: PlayerId, cardUid?: string): DingState {
-  const pending = state.pending;
-  if (!pending || pending.kind !== "dying" || state.status !== "playing") return state;
+  const pending = topFrame(state.stack);
+  if (state.status !== "playing" || !pending || pending.kind !== "dying") return state;
   const expectedResponder = pending.responders[pending.cursor];
   if (responderId !== expectedResponder) return state;
 
@@ -541,16 +716,17 @@ export function respondToDying(state: DingState, responderId: PlayerId, cardUid?
     return withAction(state, "table", [...texts, `${getPlayer(players, pending.targetId).displayName}脱离濒死。`], {
       players,
       discard,
-      pending: undefined,
+      stack: state.stack.slice(0, -1),
     });
   }
 
   const cursor = (pending.cursor + 1) % pending.responders.length;
   if (cursor === 0) {
     const death = resolveDeath(
-      { ...state, players, discard, pending: undefined },
+      { ...state, players, discard, stack: state.stack.slice(0, -1) },
       pending.targetId,
       pending.sourceId,
+      state.stack.slice(0, -1),
     );
     return withAction(death, "table", texts, {});
   }
@@ -558,7 +734,7 @@ export function respondToDying(state: DingState, responderId: PlayerId, cardUid?
   return withAction(state, responderId, texts, {
     players,
     discard,
-    pending: { ...pending, offered, cursor },
+    stack: [...state.stack.slice(0, -1), { ...pending, offered, cursor }],
   });
 }
 
@@ -569,7 +745,7 @@ export function requiredDiscards(state: DingState, actorId: PlayerId): number {
 }
 
 export function discardCards(state: DingState, actorId: PlayerId, cardUids: readonly string[]): DingState {
-  if (state.status !== "playing" || state.phase !== "discard" || state.activePlayerId !== actorId) return state;
+  if (state.status !== "playing" || state.phase !== "discard" || state.activePlayerId !== actorId || state.stack.length > 0) return state;
   const required = requiredDiscards(state, actorId);
   if (cardUids.length !== required) return state;
   const actor = getPlayer(state.players, actorId);
@@ -588,7 +764,7 @@ export function discardCards(state: DingState, actorId: PlayerId, cardUids: read
 }
 
 export function endTurn(state: DingState, actorId: PlayerId): DingState {
-  if (state.status !== "playing" || state.phase !== "play" || state.pending || state.activePlayerId !== actorId) return state;
+  if (state.status !== "playing" || state.phase !== "play" || state.stack.length > 0 || state.activePlayerId !== actorId) return state;
   const actor = getPlayer(state.players, actorId);
   const next = withAction(state, actorId, [`${actor.displayName}结束出牌阶段。`], {});
   if (actor.hand.length > actor.hp) return { ...next, phase: "discard" };
@@ -610,7 +786,7 @@ function settleEnd(state: DingState): DingState {
 }
 
 export function advancePhase(state: DingState): DingState {
-  if (state.status !== "playing" || state.pending) return state;
+  if (state.status !== "playing" || state.stack.length > 0) return state;
   const actor = getPlayer(state.players, state.activePlayerId);
 
   if (state.phase === "prepare") {

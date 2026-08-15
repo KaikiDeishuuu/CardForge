@@ -15,8 +15,9 @@ import {
   requiredDiscards,
   respondToDying,
   respondToStrike,
+  respondToTrick,
 } from "./domain/engine";
-import { chooseAiDiscards, chooseAiDyingResponse, chooseAiMove, chooseAiStrikeResponse } from "./domain/ai";
+import { chooseAiDiscards, chooseAiDyingResponse, chooseAiMove, chooseAiNullifyResponse, chooseAiStrikeResponse } from "./domain/ai";
 import { IDENTITY_NAMES, WINNER_COPY } from "./domain/data";
 import { DING_SAVE_SCHEMA_VERSION, restoreDingState, serializeDingState } from "./domain/persistence";
 import type { DingCard, DingPlayer, DingState, PlayerId } from "./domain/types";
@@ -108,25 +109,29 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
   const human = state.players.find((player) => player.controller === "human")!;
   const active = state.players.find((player) => player.id === state.activePlayerId)!;
   const selectedCard = selectedCardUid ? human.hand.find((card) => card.id === selectedCardUid) : undefined;
-  const playableCards = state.status === "playing" && state.phase === "play" && !state.pending && active.id === human.id
+  const stackTop = state.stack.at(-1);
+  const playableCards = state.status === "playing" && state.phase === "play" && state.stack.length === 0 && active.id === human.id
     ? getPlayableCards(state, human.id)
     : [];
   const targetOptions = selectedCard ? getTargetOptions(state, human.id, selectedCard) : [];
-  const pendingStrike = state.pending?.kind === "strike" ? state.pending : undefined;
-  const pendingDying = state.pending?.kind === "dying" ? state.pending : undefined;
+  const pendingStrike = stackTop?.kind === "strike" ? stackTop : undefined;
+  const pendingDying = stackTop?.kind === "dying" ? stackTop : undefined;
+  const pendingTrick = stackTop?.kind === "trick" ? stackTop : undefined;
   const dyingResponder = pendingDying ? pendingDying.responders[pendingDying.cursor] : undefined;
-  const humanCanPlay = playableCards.length > 0 && state.phase === "play" && active.id === human.id && !state.pending;
-  const humanDiscarding = state.phase === "discard" && active.id === human.id && requiredDiscards(state, human.id) > 0 && !state.pending;
+  const trickResponder = pendingTrick?.awaitingResponse ? pendingTrick.responders[pendingTrick.cursor] : undefined;
+  const humanCanPlay = playableCards.length > 0 && state.phase === "play" && active.id === human.id && state.stack.length === 0;
+  const humanDiscarding = state.phase === "discard" && active.id === human.id && requiredDiscards(state, human.id) > 0 && state.stack.length === 0;
   const humanRespondingStrike = pendingStrike?.targetId === human.id;
   const humanRespondingDying = dyingResponder === human.id;
+  const humanRespondingTrick = trickResponder === human.id;
   const overlayOpen = showRules || showLog || state.status === "finished";
-  const pendingHumanResponse = humanRespondingStrike || humanRespondingDying;
+  const pendingHumanResponse = humanRespondingStrike || humanRespondingDying || humanRespondingTrick;
 
   const shouldAutomate = state.status === "playing"
     && !overlayOpen
     && !pendingHumanResponse
     && (
-      state.pending !== undefined
+      state.stack.length > 0
       || active.controller === "ai"
       || (active.id === human.id && state.phase !== "play" && !humanDiscarding)
     );
@@ -142,7 +147,7 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
       const timer = window.setTimeout(() => {
         playSound(evadeUid ? "card" : "hit");
         setState((current) => {
-          if (current.revision !== expectedRevision || current.pending?.kind !== "strike") return current;
+          if (current.revision !== expectedRevision || current.stack.at(-1)?.kind !== "strike") return current;
           return respondToStrike(current, responder.id, evadeUid);
         });
       }, playbackDelay(560, playbackSpeed));
@@ -154,7 +159,7 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
       const timer = window.setTimeout(() => {
         playSound(salveUid ? "heal" : "tap");
         setState((current) => {
-          const pending = current.pending;
+          const pending = current.stack.at(-1);
           if (current.revision !== expectedRevision || pending?.kind !== "dying") return current;
           const responder = pending.responders[pending.cursor];
           return respondToDying(current, responder, salveUid);
@@ -163,10 +168,24 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
       return () => window.clearTimeout(timer);
     }
 
+    if (pendingTrick && trickResponder) {
+      const nullifyUid = chooseAiNullifyResponse(state, trickResponder);
+      const timer = window.setTimeout(() => {
+        playSound(nullifyUid ? "card" : "tap");
+        setState((current) => {
+          const pending = current.stack.at(-1);
+          if (current.revision !== expectedRevision || pending?.kind !== "trick") return current;
+          const responder = pending.responders[pending.cursor];
+          return respondToTrick(current, responder, nullifyUid);
+        });
+      }, playbackDelay(560, playbackSpeed));
+      return () => window.clearTimeout(timer);
+    }
+
     const timer = window.setTimeout(() => {
       setState((current) => {
         if (current.revision !== expectedRevision || current.status !== "playing") return current;
-        if (current.phase === "play" && current.activePlayerId === actorId && current.pending === undefined) {
+        if (current.phase === "play" && current.activePlayerId === actorId && current.stack.length === 0) {
           const move = chooseAiMove(current, actorId);
           if (move.kind === "play" && move.cardUid) {
             playSound("card");
@@ -184,7 +203,7 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
       });
     }, playbackDelay(420, playbackSpeed));
     return () => window.clearTimeout(timer);
-  }, [dyingResponder, pendingDying, pendingStrike, playSound, playbackSpeed, shouldAutomate, state]);
+  }, [dyingResponder, pendingDying, pendingStrike, pendingTrick, playSound, playbackSpeed, shouldAutomate, state, trickResponder]);
 
   useEffect(() => {
     if (!persistence || saveBlocked || (state.revision === 0 && !persistence.restored)) return;
@@ -266,11 +285,22 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
     playSound("card");
   }
 
+  const trickCardName = (frame: { readonly cardUid: string }) =>
+    state.discard.find((card) => card.id === frame.cardUid)?.name ?? "锦囊";
+  const counterFrame = pendingTrick?.counterFrameId
+    ? state.stack.find((frame) => frame.kind === "trick" && frame.frameId === pendingTrick.counterFrameId)
+    : undefined;
+  const counterTargetName = counterFrame?.kind === "trick" ? trickCardName(counterFrame) : "锦囊";
+
   const tableMessage = pendingStrike
     ? `${state.players.find((player) => player.id === pendingStrike.actorId)?.displayName}的「刺击」等待响应。`
     : pendingDying
       ? `${state.players.find((player) => player.id === pendingDying.targetId)?.displayName}正在濒死求援。`
-      : state.lastAction?.text ?? "等待行动。";
+      : pendingTrick
+        ? pendingTrick.cardType === "nullify"
+          ? `${state.players.find((player) => player.id === pendingTrick.actorId)?.displayName}的「无懈可击」等待反制响应。`
+          : `${state.players.find((player) => player.id === pendingTrick.actorId)?.displayName}的「${state.discard.find((card) => card.id === pendingTrick.cardUid)?.name ?? "锦囊"}」等待无懈可击响应。`
+        : state.lastAction?.text ?? "等待行动。";
   const required = humanDiscarding ? requiredDiscards(state, human.id) : 0;
   const discardReady = humanDiscarding && discardSelection.length === required;
 
@@ -368,6 +398,31 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
               </div>
             </>
           ) : null}
+          {humanRespondingTrick && pendingTrick ? (
+            <>
+              <div>
+                <small>无懈可击响应</small>
+                <strong>
+                  {pendingTrick.cardType === "nullify"
+                    ? `${state.players.find((player) => player.id === pendingTrick.actorId)?.displayName}的「无懈可击」正指向「${counterTargetName}」`
+                    : `${state.players.find((player) => player.id === pendingTrick.actorId)?.displayName}的「${trickCardName(pendingTrick)}」等待响应`}
+                </strong>
+                <p>打出「无懈可击」抵消这张锦囊，或选择不响应。</p>
+              </div>
+              <div className="ding-response__actions">
+                {human.hand.filter((card) => card.type === "nullify").map((card) => (
+                  <button key={card.id} type="button" onClick={() => {
+                    setState((current) => respondToTrick(current, human.id, card.id));
+                    playSound("card");
+                  }}>无懈可击</button>
+                ))}
+                <button type="button" onClick={() => {
+                  setState((current) => respondToTrick(current, human.id));
+                  playSound("tap");
+                }}>不响应</button>
+              </div>
+            </>
+          ) : null}
         </section>
       ) : (
         <section className="ding-hand-dock" aria-label="你的手牌">
@@ -414,7 +469,7 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
             ) : (
               <>
                 <button type="button" className="ding-action ding-action--primary" disabled={!humanCanPlay || !selectedCardUid} onClick={playSelection}>出牌 →</button>
-                <button type="button" className="ding-action" disabled={!(state.phase === "play" && active.id === human.id && !state.pending)} onClick={() => {
+                <button type="button" className="ding-action" disabled={!(state.phase === "play" && active.id === human.id && state.stack.length === 0)} onClick={() => {
                   setState((current) => endTurn(current, human.id));
                   setSelectedCardUid(undefined);
                   setSelectedTargetId(undefined);
@@ -438,18 +493,20 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
           <article className="ding-rules">
             <button type="button" className="ding-rules__close" onClick={() => setShowRules(false)} aria-label="关闭规则">×</button>
             <span className="ding-rules__ribbon">身份局</span>
-            <small>TABLE 004 · M0 规则骨架</small>
+            <small>TABLE 004 · M1 结算栈</small>
             <h2 id="ding-rules-title">四席暗局，<br />先明主君，再定鼎。</h2>
             <p>主君身份公开并多 1 点体力；其余三人身份隐藏。主君与辅臣要清剿叛锋与流谋；叛锋要在主君倒下时达阵；流谋必须成为主君倒下时唯一的其他存活者。</p>
             <div className="ding-rules__grid">
               <span><b>回合</b>准备 → 摸 2 张 → 出牌 → 弃牌到手牌上限（等于当前体力）</span>
               <span><b>刺击</b>攻击范围内每回合一次；目标可出「闪避」</span>
               <span><b>疗元</b>受伤时自疗，或在任何人濒死时救援</span>
+              <span><b>锦囊</b>聚势/拆解/牵袭进入结算栈，按座位顺序询问「无懈可击」</span>
+              <span><b>无懈</b>抵消一张锦囊；无懈本身可被另一张无懈反制，层层嵌套后自栈顶结算</span>
               <span><b>距离</b>相邻座位为 1；赤影 -1、磐影 +1、长锋射程 2</span>
               <span><b>胜负</b>主君死时若只剩流谋则流谋胜，否则叛锋胜；叛锋与流谋全灭则主君方胜</span>
               <span><b>奖惩</b>击退叛锋摸 3 张；主君误杀辅臣弃光手牌</span>
             </div>
-            <p className="ding-rules__scope">M0 暂不包含武将技能、决斗、无懈可击、群体锦囊与延时锦囊；这些会在后续里程碑加入。</p>
+            <p className="ding-rules__scope">M1 已支持无懈可击响应链与结算栈；武将技能、决斗、群体锦囊与延时锦囊仍留待后续里程碑。</p>
             <button type="button" className="ding-rules__enter" onClick={() => { setShowRules(false); playSound("card"); }}>入席开局 <span>→</span></button>
           </article>
         </div>
