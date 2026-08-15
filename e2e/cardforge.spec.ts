@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { installClassicBettingSave } from "./twentyOneFixtures";
 
 function collectPageErrors(page: Page) {
   const errors: string[] = [];
@@ -26,7 +27,7 @@ async function enterGame(page: Page, id: "ember-pact" | "twenty-one" | "guandan"
   await page.goto(`/?game=${id}`);
   const entryLabels = {
     "ember-pact": "点亮熔炉",
-    "twenty-one": "开始判断",
+    "twenty-one": "入座经典牌桌",
     guandan: "入席开牌",
   } as const;
   await page.getByRole("button", { name: new RegExp(entryLabels[id]) }).click();
@@ -105,13 +106,10 @@ test("烬契开局后战术炉谱不会重置对局", async ({ page }, testInfo)
   assertNoPageErrors();
 });
 
-test("二十一刻可以下注、要牌并结算到下一手", async ({ page }) => {
+test("二十一刻可以下注并要牌", async ({ page }) => {
   const assertNoPageErrors = collectPageErrors(page);
+  await installClassicBettingSave(page, ["10", "6", "6", "10", "2"]);
   await page.goto("/?game=twenty-one");
-
-  const entry = page.getByRole("button", { name: /开始判断/ });
-  await expect(entry).toBeFocused();
-  await entry.click();
 
   const chips = page.locator(".chip-stack b");
   await expect(chips).toHaveText("500");
@@ -119,16 +117,9 @@ test("二十一刻可以下注、要牌并结算到下一手", async ({ page }) 
   const hit = page.getByRole("button", { name: /要牌/ });
   const cards = page.locator(".playing-hand--player .tw-card");
 
-  // 押注后有可能直接 Blackjack 结算，赔付会立刻改写筹码，下一轮的起点也随之不同。
-  // 所以这里只断言确实发了牌、押注已记在牌桌上，不断言具体余额。
-  for (let attempt = 0; attempt < 6; attempt += 1) {
-    await page.getByRole("button", { name: "压 25 枚筹码" }).click();
-    await expect(cards).toHaveCount(2);
-    await expect(page.locator(".chip-stack em")).toHaveText("押 25");
-    if (await hit.isEnabled()) break;
-    await page.getByRole("button", { name: /下一手/ }).click();
-  }
-
+  await page.getByRole("button", { name: "压 25 枚筹码" }).click();
+  await expect(cards).toHaveCount(2);
+  await expect(page.locator(".chip-stack em")).toHaveText("押 25");
   await expect(hit).toBeEnabled();
   const initialCount = await cards.count();
   await hit.click();
@@ -139,12 +130,14 @@ test("二十一刻可以下注、要牌并结算到下一手", async ({ page }) 
 test("二十一刻的对局会跨刷新续玩", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "断点续玩与视口无关，只在一个桌面项目验证");
   const assertNoPageErrors = collectPageErrors(page);
+  await installClassicBettingSave(page, ["8", "6", "8", "10", "3", "2"]);
   await page.goto("/?game=twenty-one");
-  await page.getByRole("button", { name: /开始判断/ }).click();
 
   await expect(page.locator(".chip-stack b")).toHaveText("500");
   await page.getByRole("button", { name: "压 25 枚筹码" }).click();
   await expect(page.locator(".playing-hand--player .tw-card")).toHaveCount(2);
+  await page.getByRole("button", { name: "分牌", exact: true }).click();
+  await expect(page.locator(".hand-rail > li")).toHaveCount(2);
   // 等存档真正落盘再刷新，避免在 effect 写入前就重载。
   await expect.poll(() =>
     page.evaluate(() => window.localStorage.getItem("cardforge.save.twenty-one") !== null),
@@ -153,9 +146,10 @@ test("二十一刻的对局会跨刷新续玩", async ({ page }, testInfo) => {
   const phaseBefore = await page.locator(".table-status small").textContent();
   await page.reload();
 
-  await expect(page.locator(".playing-hand--player .tw-card")).toHaveCount(2);
+  await expect(page.locator(".playing-hand--player .tw-card")).toHaveCount(4);
+  await expect(page.locator(".hand-rail > li")).toHaveCount(2);
   await expect(page.locator(".table-status small")).toHaveText(phaseBefore ?? "");
-  await expect(page.locator(".chip-stack em")).toHaveText("押 25");
+  await expect(page.locator(".chip-stack em")).toHaveText("押 50");
   assertNoPageErrors();
 });
 
@@ -198,7 +192,7 @@ test("声音偏好会跨牌桌和刷新保持", async ({ page }, testInfo) => {
   await expect(page.getByRole("button", { name: "开启声音" })).toBeVisible();
   await page.reload();
   await expect(page.getByRole("button", { name: "开启声音" })).toBeVisible();
-  await page.getByRole("button", { name: /开始判断/ }).click();
+  await page.getByRole("button", { name: /入座经典牌桌/ }).click();
   await page.getByRole("button", { name: "返回游戏大厅" }).click();
   await expect(page.getByRole("button", { name: "声音关" })).toBeVisible();
   assertNoPageErrors();
@@ -224,7 +218,7 @@ test("游戏模块加载期间显示带忙碌状态的宿主页", async ({ page 
 test("游戏模块加载失败后可以重试恢复", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "宿主生命周期与视口无关，只在一个桌面项目验证");
   let shouldFail = true;
-  await page.route("**/src/games/twenty-one/index.ts", async (route) => {
+  await page.route(/\/src\/games\/twenty-one\/.*\.(?:ts|tsx)(?:\?.*)?$/, async (route) => {
     if (shouldFail) await route.abort("failed");
     else await route.continue();
   });
@@ -237,7 +231,7 @@ test("游戏模块加载失败后可以重试恢复", async ({ page }, testInfo)
 
   shouldFail = false;
   await retry.click();
-  await expect(page.getByRole("dialog", { name: /第二十一格/ })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: /选择这一席/ })).toBeVisible();
 });
 
 for (const game of [

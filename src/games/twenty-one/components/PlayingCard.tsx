@@ -12,16 +12,17 @@ interface PlayingCardProps {
   card: PlayingCardData;
   hidden?: boolean;
   fresh?: boolean;
+  revealed?: boolean;
   index: number;
 }
 
-export function PlayingCard({ card, hidden = false, fresh = false, index }: PlayingCardProps) {
+export function PlayingCard({ card, hidden = false, fresh = false, revealed = false, index }: PlayingCardProps) {
   const symbol = SUIT_SYMBOLS[card.suit];
   const style = { "--card-index": index } as CSSProperties;
 
   return (
     <div
-      className={`tw-card tw-card--${card.suit} ${hidden ? "is-hidden" : ""} ${fresh ? "is-fresh" : ""}`}
+      className={`tw-card tw-card--${card.suit} ${hidden ? "is-hidden" : ""} ${fresh ? "is-fresh" : ""} ${revealed ? "is-revealed" : ""}`}
       style={style}
       role="img"
       aria-label={hidden ? "庄家的暗牌" : card.name}
