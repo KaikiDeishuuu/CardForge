@@ -146,10 +146,35 @@ jobs:
           echo "current -> $(readlink current)"
           REMOTE
 
-      - name: Verify the site is serving the new release
+      # 校验在**源站**上做，不经 Cloudflare：CDN 会对 GitHub 的机房 IP 返回 403，
+      # 那检查的是 CDN 的风控策略而不是这次发布。源站校验既权威又不受缓存影响。
+      - name: Verify the release is live on the origin
         env:
+          SSH_HOST: ${{ secrets.DEPLOY_HOST }}
+          SSH_USER: ${{ secrets.DEPLOY_USER }}
+          SSH_PORT: ${{ secrets.DEPLOY_PORT }}
+          SITE_ROOT: ${{ secrets.DEPLOY_PATH }}
           SITE_URL: ${{ secrets.DEPLOY_SITE_URL }}
+          RELEASE: ${{ github.sha }}
         run: |
           set -euo pipefail
-          code=$(curl -fsS -o /dev/null -w '%{http_code}' --retry 3 --retry-delay 2 "$SITE_URL")
-          echo "GET $SITE_URL -> $code"
+          SSH_OPTS="-i $HOME/.ssh/deploy_key -p $SSH_PORT -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o BatchMode=yes"
+          SITE_HOST="${SITE_URL#*://}"; SITE_HOST="${SITE_HOST%%/*}"
+
+          ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" bash -s -- "$SITE_ROOT" "$RELEASE" "$SITE_HOST" <<'REMOTE'
+          set -euo pipefail
+          SITE_ROOT="$1"
+          RELEASE="$2"
+          SITE_HOST="$3"
+
+          link=$(readlink "$SITE_ROOT/current")
+          if [ "$link" != "releases/$RELEASE" ]; then
+            echo "current 指向 $link，期望 releases/$RELEASE" >&2
+            exit 1
+          fi
+
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --retry 3 --retry-delay 2 \
+            --resolve "$SITE_HOST:443:127.0.0.1" "https://$SITE_HOST/")
+          echo "origin GET https://$SITE_HOST/ -> $code   (current -> $link)"
+          [ "$code" = "200" ]
+          REMOTE

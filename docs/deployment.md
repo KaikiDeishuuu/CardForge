@@ -43,8 +43,12 @@ push 到 main
                  ├─ rsync 到 releases/<sha>/
                  ├─ mv -T 原子切换 current
                  ├─ 只保留最近 5 个 release
-                 └─ curl 冒烟校验
+                 └─ 在源站校验 current 指向本次 sha 且返回 200
 ```
+
+冒烟校验走 SSH 在**源站**做，不经 Cloudflare：CDN 对 GitHub Actions 的机房 IP
+返回 403，那检查的是风控策略而非本次发布。源站校验同时断言 `current` 确实
+指向本次 commit，也不受 CDN 缓存影响。
 
 部署的是 **quality job 构建并测过的那一份产物**，deploy job 不重新构建——上线的字节
 与通过测试的字节是同一份。`current` 的切换是单个 `mv -T`（一次 rename 系统调用），
