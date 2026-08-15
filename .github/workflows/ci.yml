@@ -39,6 +39,16 @@ jobs:
       - name: Build production bundle
         run: npm run build
 
+      # 部署用的正是这一份产物，而不是在 deploy job 里重新构建一次：
+      # 上线的字节与通过测试的字节必须是同一份。
+      - name: Upload production bundle
+        uses: actions/upload-artifact@v6
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
+          if-no-files-found: error
+
       - name: Run Ember Pact balance baseline
         run: npm run test:balance:ember
 
@@ -68,3 +78,78 @@ jobs:
           path: test-results/
           retention-days: 7
           if-no-files-found: ignore
+
+  deploy:
+    name: Deploy to production
+    needs: quality
+    # 只有 main 分支的 push 才上线；PR 与其他分支即使全绿也不部署。
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    # 不取消进行中的部署：中断一次 rsync 会在服务器上留下半份 release。
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+
+    steps:
+      - name: Download the tested bundle
+        uses: actions/download-artifact@v6
+        with:
+          name: dist
+          path: dist
+
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/deploy_key"
+          # 固定服务器主机密钥。没有这一步就只能关掉 StrictHostKeyChecking，
+          # 那等于把部署暴露给中间人。
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 644 "$HOME/.ssh/known_hosts"
+
+      - name: Publish release
+        env:
+          SSH_HOST: ${{ secrets.DEPLOY_HOST }}
+          SSH_USER: ${{ secrets.DEPLOY_USER }}
+          SSH_PORT: ${{ secrets.DEPLOY_PORT }}
+          SITE_ROOT: ${{ secrets.DEPLOY_PATH }}
+          RELEASE: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          SSH_OPTS="-i $HOME/.ssh/deploy_key -p $SSH_PORT -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o BatchMode=yes"
+
+          ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" \
+            "mkdir -p '$SITE_ROOT/releases/$RELEASE'"
+
+          # 先把新版本完整传到独立的 release 目录，此时线上仍指向旧版本。
+          rsync -rlptz --delete --chmod=D755,F644 \
+            -e "ssh $SSH_OPTS" \
+            dist/ "$SSH_USER@$SSH_HOST:$SITE_ROOT/releases/$RELEASE/"
+
+          # 传完再原子换链接：mv -T 替换符号链接是单个 rename 系统调用，
+          # 用户不会在切换途中看到半份站点。顺带保留最近 5 个版本用于回滚。
+          ssh $SSH_OPTS "$SSH_USER@$SSH_HOST" bash -s -- "$SITE_ROOT" "$RELEASE" <<'REMOTE'
+          set -euo pipefail
+          SITE_ROOT="$1"
+          RELEASE="$2"
+          cd "$SITE_ROOT"
+          ln -sfn "releases/$RELEASE" current.tmp
+          mv -Tf current.tmp current
+          ls -1dt releases/*/ | tail -n +6 | xargs -r rm -rf
+          echo "current -> $(readlink current)"
+          REMOTE
+
+      - name: Verify the site is serving the new release
+        env:
+          SITE_URL: ${{ secrets.DEPLOY_SITE_URL }}
+        run: |
+          set -euo pipefail
+          code=$(curl -fsS -o /dev/null -w '%{http_code}' --retry 3 --retry-delay 2 "$SITE_URL")
+          echo "GET $SITE_URL -> $code"

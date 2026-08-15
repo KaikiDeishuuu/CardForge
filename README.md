@@ -34,6 +34,19 @@ npm run test:e2e
 
 `test:balance:ember` 会以固定种子自动完成 1000 局争焰，用于观察胜率、轮数、过载、角色退场和卡牌使用分布。`test:balance:dingding` 会以固定种子自动完成 200 局定鼎全 AI 对局，统计三方胜率、回合/决策分布、身份退场、卡牌使用、主动技发动与延时牌判定次数。也可手动运行 `npx vite-node scripts/dingding-balance.ts 100 3000 tactician` 观察战术档基线。二者都是平衡回归基线，不替代规则断言。浏览器测试会自动启动本地 Vite 服务，并在手机竖屏、常见笔记本和宽桌面三种视口验证大厅、四款游戏主流程、宿主错误恢复、偏好持久化和页面溢出。本机默认使用系统 Chrome；没有安装时先执行 `npx playwright install --with-deps chromium`，再用 `PW_CHANNEL= npm run test:e2e` 改用随 Playwright 下载的 Chromium。CI 会自动安装。失败报告可通过 `npm run test:e2e:report` 打开。
 
+## 部署
+
+生产站点：<https://game.farc.dev>
+
+CardForge 是纯静态站点，没有后端与数据库。`main` 分支的提交在 CI 全绿后会由
+GitHub Actions 自动发布：把 quality job 构建并测过的那一份 `dist/` rsync 到服务器的
+`releases/<commit sha>/`，再原子切换 `current` 符号链接，由 nginx 托管、certbot 续期证书。
+回滚只需把符号链接指回上一个 release，无需重新构建。
+
+站点与宿主机上的其他服务共用 `:443`（nginx 按 SNI 分流），因此改动服务器配置前请先读
+[docs/deployment.md](docs/deployment.md)：其中说明了拓扑、所需 Secrets、回滚、验证与排查。
+初始化脚本与线上 nginx 配置副本在 [deploy/](deploy/)。
+
 ## 项目结构
 
 ```text
