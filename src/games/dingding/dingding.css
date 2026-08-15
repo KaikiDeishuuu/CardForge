@@ -130,6 +130,7 @@
 .ding-seat__copy small { color: #b89358; font-family: var(--utility); font-size: 7px; font-weight: 900; letter-spacing: 0.1em; }
 .ding-seat__copy strong { font-size: 13px; }
 .ding-seat__copy em { color: #8fa3a0; font-size: 9px; font-style: normal; }
+.ding-seat__hero { color: #e8c987; font-family: var(--display); font-size: 10px; font-style: normal; }
 .ding-hp { width: 100%; height: 5px; display: block; background: rgba(255, 255, 255, 0.1); border-radius: 999px; overflow: hidden; }
 .ding-hp b { display: block; height: 100%; background: linear-gradient(90deg, #a83d36, #d08a4a); }
 
@@ -220,6 +221,7 @@
 .ding-hand-dock > header > span:first-child { display: flex; flex-direction: column; }
 .ding-hand-dock header small { color: #b89358; font-family: var(--utility); font-size: 7px; font-weight: 900; letter-spacing: 0.12em; }
 .ding-hand-dock header strong { font-size: 13px; }
+.ding-hand__hero { margin-top: 2px; color: #e8c987; font-family: var(--display); font-size: 10px; font-style: normal; }
 .ding-action-copy { color: #a9bcb7; font-size: 10px; text-align: right; }
 
 .ding-hand { margin: 8px 0; display: flex; gap: 7px; overflow-x: auto; scrollbar-width: none; }
@@ -368,6 +370,16 @@
   .ding-response__actions { justify-content: stretch; }
   .ding-response__actions button { flex: 1; }
   .ding-rules__grid { grid-template-columns: 1fr; }
+}
+
+@media (max-height: 820px) {
+  .ding-topbar { min-height: 56px; padding-top: 6px; padding-bottom: 6px; }
+  .ding-table { padding-top: 4px; padding-bottom: 4px; }
+  .ding-seat { padding-top: 6px; padding-bottom: 6px; }
+  .ding-seat__copy { gap: 1px; }
+  .ding-seat__hero { font-size: 9px; }
+  .ding-hand-dock { padding-top: 6px; }
+  .ding-hand__hero { font-size: 9px; }
 }
 
 @media (min-width: 1100px) {

@@ -45,6 +45,10 @@ export interface DingPlayer extends ParticipantIdentity {
   readonly alive: boolean;
   readonly hand: readonly DingCard[];
   readonly equipment: Readonly<Partial<Record<EquipmentSlot, DingCard>>>;
+  /** 武将 id，索引 HERO_CATALOG；空字符串表示测试状态没有武将。 */
+  readonly heroId: string;
+  /** 按技能触发点记录的本回合一次性标记，回合结束时清空。 */
+  readonly skillFlags: Readonly<Record<string, boolean>>;
 }
 
 /**

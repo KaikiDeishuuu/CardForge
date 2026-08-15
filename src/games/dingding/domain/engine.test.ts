@@ -10,6 +10,7 @@ import {
   chooseAiVolleyResponse,
 } from "./ai";
 import { buildDeck } from "./data";
+import { HERO_CATALOG } from "./heroes";
 import {
   advancePhase,
   createInitialState,
@@ -65,6 +66,8 @@ function player(id: PlayerId, overrides: Partial<DingPlayer> = {}): DingPlayer {
     alive: true,
     hand: [],
     equipment: {},
+    heroId: "",
+    skillFlags: {},
     ...overrides,
   };
 }
@@ -128,6 +131,107 @@ describe("Ding Ding engine", () => {
     // 南座 -1 马抵消东座 +1 马，但相邻距离最小为 1。
     expect(distanceBetween(players, "south", "east")).toBe(1);
     expect(distanceBetween(players, "south", "north")).toBe(1);
+  });
+
+  it("deals a unique hero to every player", () => {
+    const initial = createInitialState(fixedRandom);
+    const heroIds = initial.players.map((entry) => entry.heroId);
+    expect(new Set(heroIds).size).toBe(4);
+    expect(heroIds.every((id) => id in HERO_CATALOG)).toBe(true);
+    expect(initial.players.every((entry) => Object.keys(entry.skillFlags).length === 0)).toBe(true);
+  });
+
+  it("applies hero distance passives", () => {
+    const players = [
+      player("south", { heroId: "whitesteed" }),
+      player("east", { heroId: "cloudstep" }),
+      player("north"),
+      player("west"),
+    ];
+    // 白骑 -1：对角距离 2 变成 1；云隐 +1 与白骑抵消后仍是最小 1。
+    expect(distanceBetween(players, "south", "north")).toBe(1);
+    expect(distanceBetween(players, "south", "east")).toBe(1);
+    // 云隐 +1：北座到东座由相邻 1 变成 2。
+    expect(distanceBetween(players, "north", "east")).toBe(2);
+    expect(distanceBetween(players, "north", "south")).toBe(2);
+  });
+
+  it("heals the active player at turn start with 回春", () => {
+    const game = state({ phase: "prepare" }, [
+      player("south", { hp: 2, heroId: "springtide" }),
+      player("east"),
+      player("north"),
+      player("west"),
+    ]);
+    const next = advancePhase(game);
+    expect(next.phase).toBe("draw");
+    expect(next.players[0].hp).toBe(3);
+    expect(next.log.some((entry) => entry.text.includes("回春"))).toBe(true);
+  });
+
+  it("draws at turn end with 筹谋 and resets once-per-turn flags", () => {
+    const game = state({ deck: [card("strike", "drawn-0")], rngSeed: 7 }, [
+      player("south", { heroId: "scrollkeeper", skillFlags: { damageDealt: true } }),
+      player("east"),
+      player("north"),
+      player("west"),
+    ]);
+    const next = endTurn(game, "south");
+    expect(next.players[0].hand.map((entry) => entry.id)).toEqual(["drawn-0"]);
+    expect(next.players[0].skillFlags).toEqual({});
+    expect(next.activePlayerId).toBe("east");
+    expect(next.log.some((entry) => entry.text.includes("筹谋"))).toBe(true);
+  });
+
+  it("triggers 厉兵 and 承创 once per turn on damage", () => {
+    const game = state({ deck: [card("salve", "p1"), card("salve", "p2")], rngSeed: 7 }, [
+      player("south", { hand: [card("strike", "s1"), card("strike", "s2")], heroId: "redblade" }),
+      player("east", { hp: 3, heroId: "ironward" }),
+      player("north"),
+      player("west"),
+    ]);
+    let next = respondToStrike(playCard(game, "south", "s1", "east"), "east");
+    expect(next.players[0].hand).toHaveLength(2); // s2 + 厉兵摸的疗元
+    expect(next.players[1].hand).toHaveLength(1); // 承创摸的疗元
+    expect(next.players[1].hp).toBe(2);
+
+    next = respondToStrike(playCard({ ...next, strikeUsed: false }, "south", "s2", "east"), "east");
+    expect(next.players[1].hp).toBe(1);
+    // 本回合第二次伤害不再触发一次性技能。
+    expect(next.players[0].hand).toHaveLength(1);
+    expect(next.players[1].hand).toHaveLength(1);
+    expect(next.players[0].skillFlags.damageDealt).toBe(true);
+    expect(next.players[1].skillFlags.damageReceived).toBe(true);
+  });
+
+  it("draws two cards when 遗烈 enters dying", () => {
+    const game = state({ deck: [card("salve", "p1"), card("salve", "p2")], rngSeed: 7 }, [
+      player("south", { hand: [card("strike", "s1")] }),
+      player("east", { hp: 1, heroId: "lastwill" }),
+      player("north"),
+      player("west"),
+    ]);
+    let next = respondToStrike(playCard(game, "south", "s1", "east"), "east");
+    expect(next.stack.at(-1)).toMatchObject({ kind: "dying", targetId: "east" });
+    expect(next.players[1].hand).toHaveLength(2);
+    expect(next.log.some((entry) => entry.text.includes("死志"))).toBe(true);
+
+    const dying = next.stack.at(-1);
+    if (dying?.kind === "dying") next = respondToDying(next, dying.responders[dying.cursor], "p1");
+    expect(next.stack).toHaveLength(0);
+    expect(next.players[1].hp).toBe(1);
+  });
+
+  it("draws an extra card after 明鉴 resolves a trick", () => {
+    const game = state({ deck: [card("strike", "d1"), card("evade", "d2"), card("salve", "d3")], rngSeed: 7 }, [
+      player("south", { hand: [card("focus", "focus-0")], heroId: "cleareye" }),
+      player("east"),
+      player("north"),
+      player("west"),
+    ]);
+    const next = passAllTrickResponses(playCard(game, "south", "focus-0", "south"));
+    expect(next.players[0].hand).toHaveLength(3); // 聚势摸 2 + 洞彻摸 1
+    expect(next.log.some((entry) => entry.text.includes("洞彻"))).toBe(true);
   });
 
   it("resolves a strike with an evade and without one", () => {

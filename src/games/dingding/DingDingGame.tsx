@@ -31,6 +31,7 @@ import {
   chooseAiVolleyResponse,
 } from "./domain/ai";
 import { IDENTITY_NAMES, WINNER_COPY } from "./domain/data";
+import { HERO_CATALOG, type HeroId } from "./domain/heroes";
 import { DING_SAVE_SCHEMA_VERSION, restoreDingState, serializeDingState } from "./domain/persistence";
 import type { DingCard, DingPlayer, DingState, PlayerId } from "./domain/types";
 import "./dingding.css";
@@ -61,6 +62,7 @@ function Seat({ player, active, targetable, onTarget, onInspect, selectionActive
   onInspect: (id: PlayerId) => void;
 }) {
   const identity = player.revealed ? IDENTITY_NAMES[player.identity] : "？";
+  const hero = HERO_CATALOG[player.heroId as HeroId];
   const equipment = [
     player.equipment.weapon,
     player.equipment.minusHorse,
@@ -72,12 +74,13 @@ function Seat({ player, active, targetable, onTarget, onInspect, selectionActive
       type="button"
       className={`ding-seat ding-seat--${SEAT_LAYOUT[player.id]} ${active ? "is-active" : ""} ${targetable ? "is-targetable" : ""} ${selectionActive && !targetable ? "is-invalid" : ""} ${!player.alive ? "is-dead" : ""}`}
       onClick={() => targetable ? onTarget(player.id) : onInspect(player.id)}
-      aria-label={`${player.displayName}，${identity}，体力 ${player.hp}/${player.maxHp}，${player.hand.length} 张手牌${targetable ? "，可选为目标" : ""}`}
+      aria-label={`${player.displayName}，${identity}，${hero ? `${hero.name}·${hero.skillName}` : "无武将"}，体力 ${player.hp}/${player.maxHp}，${player.hand.length} 张手牌${targetable ? "，可选为目标" : ""}`}
     >
       <span className="ding-seat__mark" aria-hidden="true">{player.revealed ? IDENTITY_NAMES[player.identity].slice(0, 1) : "隐"}</span>
       <span className="ding-seat__copy">
         <small>{player.revealed ? IDENTITY_NAMES[player.identity] : "身份隐藏"}</small>
         <strong>{player.displayName}</strong>
+        {hero && <i className="ding-seat__hero" title={`${hero.title} · ${hero.description}`}>{hero.name} · {hero.skillName}</i>}
         <i className="ding-hp"><b style={{ width: `${Math.max(0, Math.min(100, (player.hp / player.maxHp) * 100))}%` }} /></i>
         <em>{player.alive ? `${player.hp}/${player.maxHp} · ${player.hand.length} 张` : "已退场"}</em>
       </span>
@@ -563,7 +566,15 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
       ) : (
         <section className="ding-hand-dock" aria-label="你的手牌">
           <header>
-            <span><small>你的身份 · {IDENTITY_NAMES[human.identity]}</small><strong>手牌 {human.hand.length}</strong></span>
+            <span>
+              <small>你的身份 · {IDENTITY_NAMES[human.identity]}</small>
+              <strong>手牌 {human.hand.length}</strong>
+              {HERO_CATALOG[human.heroId as HeroId] && (
+                <em className="ding-hand__hero" title={HERO_CATALOG[human.heroId as HeroId].description}>
+                  {HERO_CATALOG[human.heroId as HeroId].name} · {HERO_CATALOG[human.heroId as HeroId].skillName}
+                </em>
+              )}
+            </span>
             <span className="ding-action-copy">
               {humanDiscarding
                 ? `弃牌阶段：请选 ${required} 张弃置（${discardSelection.length}/${required}）`
@@ -629,7 +640,7 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
           <article className="ding-rules">
             <button type="button" className="ding-rules__close" onClick={() => setShowRules(false)} aria-label="关闭规则">×</button>
             <span className="ding-rules__ribbon">身份局</span>
-            <small>TABLE 004 · M1.5 扩展牌池</small>
+            <small>TABLE 004 · M2 武将技能</small>
             <h2 id="ding-rules-title">四席暗局，<br />先明主君，再定鼎。</h2>
             <p>主君身份公开并多 1 点体力；其余三人身份隐藏。主君与辅臣要清剿叛锋与流谋；叛锋要在主君倒下时达阵；流谋必须成为主君倒下时唯一的其他存活者。</p>
             <div className="ding-rules__grid">
@@ -640,11 +651,12 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
               <span><b>无懈</b>抵消一张锦囊；无懈本身可被另一张无懈反制，层层嵌套后自栈顶结算</span>
               <span><b>约斗</b>目标先出「刺击」，双方轮流；先打不出的一方受对方 1 点伤害</span>
               <span><b>合围/齐射</b>其他角色依次需出「刺击」/「闪避」，否则受 1 点伤害</span>
+              <span><b>武将</b>每人随机一名不重复的原创武将，技能在回合、伤害、濒死或锦囊结算时自动触发</span>
               <span><b>距离</b>相邻座位为 1；赤影 -1、磐影 +1、长锋射程 2</span>
               <span><b>胜负</b>主君死时若只剩流谋则流谋胜，否则叛锋胜；叛锋与流谋全灭则主君方胜</span>
               <span><b>奖惩</b>击退叛锋摸 3 张；主君误杀辅臣弃光手牌</span>
             </div>
-            <p className="ding-rules__scope">M1.5 已支持无懈链、约斗与群体锦囊；武将技能与延时锦囊仍留待后续里程碑。</p>
+            <p className="ding-rules__scope">M2 已支持 8 名武将的自动触发技能与距离被动；可选技能（弃牌换牌等）与延时锦囊仍留待后续里程碑。</p>
             <button type="button" className="ding-rules__enter" onClick={() => { setShowRules(false); playSound("card"); }}>入席开局 <span>→</span></button>
           </article>
         </div>
@@ -658,13 +670,16 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
             <h2 id="ding-result-title">{WINNER_COPY[state.winner].title}</h2>
             <p>{WINNER_COPY[state.winner].detail}</p>
             <div className="ding-result__identities">
-              {state.players.map((player) => (
-                <span key={player.id}>
-                  <b>{player.displayName}</b>
-                  <small>{IDENTITY_NAMES[player.identity]}</small>
-                  <em>{player.alive ? `${player.hp}/${player.maxHp}` : "退场"}</em>
-                </span>
-              ))}
+              {state.players.map((player) => {
+                const hero = HERO_CATALOG[player.heroId as HeroId];
+                return (
+                  <span key={player.id}>
+                    <b>{player.displayName}</b>
+                    <small>{IDENTITY_NAMES[player.identity]}{hero ? ` · ${hero.name}` : ""}</small>
+                    <em title={hero?.description}>{hero?.skillName ?? ""} · {player.alive ? `${player.hp}/${player.maxHp}` : "退场"}</em>
+                  </span>
+                );
+              })}
             </div>
             <div className="ding-result__actions">
               <button type="button" onClick={restart}>再来一局</button>

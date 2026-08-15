@@ -1,5 +1,6 @@
 import { CARD_CATALOG, SEAT_ORDER, buildDeck } from "./data";
 import { getPlayer } from "./engine";
+import { HERO_CATALOG } from "./heroes";
 import type {
   DingCard,
   DingPlayer,
@@ -11,10 +12,10 @@ import type {
 } from "./types";
 
 /**
- * v3：牌堆加入约斗/合围/齐射/同袍，结算栈新增 duel/horde/volley 帧。
- * v2/v1 存档的牌堆与栈结构不一致，不猜测迁移，按不可读处理（平台不会覆盖它们）。
+ * v4：玩家获得 heroId 与 skillFlags，引擎在触发点结算武将技能。
+ * v3 及更早存档没有武将字段，不猜测迁移，按不可读处理（平台不会覆盖它们）。
  */
-export const DING_SAVE_SCHEMA_VERSION = 3;
+export const DING_SAVE_SCHEMA_VERSION = 4;
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -89,7 +90,10 @@ function isPlayer(value: unknown): value is DingPlayer {
     || !isPositiveInteger(value.maxHp)
     || typeof value.alive !== "boolean"
     || !isCardList(value.hand)
-    || !isEquipment(value.equipment)) return false;
+    || !isEquipment(value.equipment)
+    || typeof value.heroId !== "string" || !(value.heroId in HERO_CATALOG)
+    || !isRecord(value.skillFlags)
+    || Object.values(value.skillFlags).some((flag) => typeof flag !== "boolean")) return false;
   const player = value as unknown as DingPlayer;
   if (player.alive) return player.hp <= player.maxHp;
   return player.hp === 0 && player.revealed;

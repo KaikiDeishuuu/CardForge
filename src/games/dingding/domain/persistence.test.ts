@@ -18,22 +18,22 @@ function craftedTrickChain(): DingState {
     {
       id: "south", displayName: "你", controller: "human", seat: 0,
       identity: "lord", revealed: true, hp: 5, maxHp: 5, alive: true,
-      hand: [], equipment: {},
+      hand: [], equipment: {}, heroId: "cloudstep", skillFlags: {},
     },
     {
       id: "east", displayName: "东座", controller: "ai", seat: 1,
       identity: "rebel", revealed: false, hp: 4, maxHp: 4, alive: true,
-      hand: [], equipment: {},
+      hand: [], equipment: {}, heroId: "cloudstep", skillFlags: {},
     },
     {
       id: "north", displayName: "北座", controller: "ai", seat: 2,
       identity: "loyalist", revealed: false, hp: 4, maxHp: 4, alive: true,
-      hand: [], equipment: {},
+      hand: [], equipment: {}, heroId: "cloudstep", skillFlags: {},
     },
     {
       id: "west", displayName: "西座", controller: "ai", seat: 3,
       identity: "renegade", revealed: false, hp: 4, maxHp: 4, alive: true,
-      hand: [], equipment: {},
+      hand: [], equipment: {}, heroId: "cloudstep", skillFlags: {},
     },
   ];
   return {
@@ -82,22 +82,22 @@ function craftedHordeState(): DingState {
     {
       id: "south", displayName: "你", controller: "human", seat: 0,
       identity: "lord", revealed: true, hp: 5, maxHp: 5, alive: true,
-      hand: [], equipment: {},
+      hand: [], equipment: {}, heroId: "cloudstep", skillFlags: {},
     },
     {
       id: "east", displayName: "东座", controller: "ai", seat: 1,
       identity: "rebel", revealed: false, hp: 4, maxHp: 4, alive: true,
-      hand: [], equipment: {},
+      hand: [], equipment: {}, heroId: "cloudstep", skillFlags: {},
     },
     {
       id: "north", displayName: "北座", controller: "ai", seat: 2,
       identity: "loyalist", revealed: false, hp: 4, maxHp: 4, alive: true,
-      hand: [], equipment: {},
+      hand: [], equipment: {}, heroId: "cloudstep", skillFlags: {},
     },
     {
       id: "west", displayName: "西座", controller: "ai", seat: 3,
       identity: "renegade", revealed: false, hp: 4, maxHp: 4, alive: true,
-      hand: [], equipment: {},
+      hand: [], equipment: {}, heroId: "cloudstep", skillFlags: {},
     },
   ];
   return {
@@ -209,5 +209,9 @@ describe("Ding Ding persistence", () => {
     const badHorde = JSON.parse(JSON.stringify(serializeDingState(craftedHordeState()))) as DingState;
     (badHorde.stack as unknown as Array<{ cursor?: number }>)[0].cursor = 5;
     expect(restoreDingState(badHorde)).toBeUndefined();
+
+    const badHero = JSON.parse(JSON.stringify(serializeDingState(createInitialState(() => 0.37))));
+    ((badHero as { players: Array<{ heroId?: string }> }).players)[0].heroId = "mystery";
+    expect(restoreDingState(badHero)).toBeUndefined();
   });
 });
