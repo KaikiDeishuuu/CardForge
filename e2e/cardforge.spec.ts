@@ -47,24 +47,26 @@ async function expectElementWithinViewport(page: Page, locator: Locator) {
   expect(horizontalOverflow, "面板内部不应产生横向滚动").toBeLessThanOrEqual(1);
 }
 
-async function enterGame(page: Page, id: "ember-pact" | "twenty-one" | "guandan") {
+async function enterGame(page: Page, id: "ember-pact" | "twenty-one" | "guandan" | "dingding") {
   await page.goto(`/?game=${id}`);
   const entryLabels = {
     "ember-pact": "开始争焰",
     "twenty-one": "入座经典牌桌",
     guandan: "入席开牌",
+    dingding: "入席开局",
   } as const;
   await page.getByRole("button", { name: new RegExp(entryLabels[id]) }).click();
 }
 
-test("大厅展示三张独立牌桌且不会横向溢出", async ({ page }) => {
+test("大厅展示四张独立牌桌且不会横向溢出", async ({ page }) => {
   const assertNoPageErrors = collectPageErrors(page);
   await page.goto("/");
 
   await expect(page.getByRole("button", { name: /争焰/ })).toBeEnabled();
   await expect(page.getByRole("button", { name: /二十一刻/ })).toBeEnabled();
   await expect(page.getByRole("button", { name: /掼蛋/ })).toBeEnabled();
-  await expect(page.locator(".featured-game, .planned-game.is-playable")).toHaveCount(3);
+  await expect(page.getByRole("button", { name: /定鼎/ })).toBeEnabled();
+  await expect(page.locator(".featured-game, .planned-game.is-playable")).toHaveCount(4);
   await expectNoDocumentOverflow(page);
   assertNoPageErrors();
 });
@@ -342,6 +344,20 @@ test("掼蛋支持键盘浏览、提示与出牌", async ({ page }) => {
   assertNoPageErrors();
 });
 
+test("定鼎身份局可以入席并展示四席暗局", async ({ page }) => {
+  const assertNoPageErrors = collectPageErrors(page);
+  await page.goto("/?game=dingding");
+
+  const entry = page.getByRole("button", { name: /入席开局/ });
+  await expect(entry).toBeVisible();
+  await entry.click();
+
+  await expect(page.getByRole("region", { name: "四席定鼎牌桌" })).toBeVisible();
+  await expect(page.locator(".ding-seat")).toHaveCount(4);
+  await expect(page.getByRole("region", { name: "你的手牌" })).toBeVisible();
+  assertNoPageErrors();
+});
+
 test("声音偏好会跨牌桌和刷新保持", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "持久化与视口无关，只在一个桌面项目验证");
   const assertNoPageErrors = collectPageErrors(page);
@@ -399,6 +415,7 @@ for (const game of [
   { id: "ember-pact", landmark: "争焰战场" },
   { id: "twenty-one", landmark: "二十一刻牌桌" },
   { id: "guandan", landmark: "四人掼蛋牌桌" },
+  { id: "dingding", landmark: "四席定鼎牌桌" },
 ] as const) {
   test(`${game.id} 牌桌适配当前视口`, async ({ page }) => {
     const assertNoPageErrors = collectPageErrors(page);
