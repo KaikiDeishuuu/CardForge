@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildDeck } from "./data";
-import { createInitialState, playCard } from "./engine";
+import { advancePhase, createInitialState, playCard, respondToDuel, respondToDying, respondToTrick } from "./engine";
 import { HERO_IDS } from "./heroes";
 import {
   DING_SAVE_SCHEMA_VERSION,
@@ -18,6 +18,60 @@ type MutableDingState = Mutable<DingState>;
 function tamper(overrides: Record<string, unknown>): unknown {
   const initial = createInitialState(() => 0.37);
   return { ...JSON.parse(JSON.stringify(serializeDingState(initial))), ...overrides };
+}
+
+/**
+ * 用引擎真实推进出「行动者死在自己回合里」的状态：东座约斗北座，北座应战、
+ * 东座接不上，反噬致死。对局仍在进行，activePlayerId 仍指向已退场的东座。
+ */
+function craftedDeadActorState(): DingState {
+  const deck = buildDeck();
+  const duel = deck.find((card) => card.type === "duel")!;
+  const strike = deck.find((card) => card.type === "strike")!;
+  const players: DingPlayer[] = [
+    {
+      id: "south", displayName: "你", controller: "human", seat: 0,
+      identity: "lord", revealed: true, hp: 5, maxHp: 5, alive: true,
+      hand: [], equipment: {}, heroId: HERO_IDS[0], skillFlags: {},
+    },
+    {
+      id: "east", displayName: "东座", controller: "ai", seat: 1,
+      identity: "rebel", revealed: false, hp: 1, maxHp: 4, alive: true,
+      hand: [duel], equipment: {}, heroId: HERO_IDS[1], skillFlags: {},
+    },
+    {
+      id: "north", displayName: "北座", controller: "ai", seat: 2,
+      identity: "loyalist", revealed: false, hp: 4, maxHp: 4, alive: true,
+      hand: [strike], equipment: {}, heroId: HERO_IDS[2], skillFlags: {},
+    },
+    {
+      id: "west", displayName: "西座", controller: "ai", seat: 3,
+      identity: "renegade", revealed: false, hp: 4, maxHp: 4, alive: true,
+      hand: [], equipment: {}, heroId: HERO_IDS[3], skillFlags: {},
+    },
+  ];
+  let game: DingState = {
+    revision: 0, status: "playing", phase: "play", difficulty: "standard",
+    turnNumber: 2, activePlayerId: "east", players,
+    deck: deck.filter((card) => card.id !== duel.id && card.id !== strike.id),
+    discard: [],
+    delayedTricks: { south: [], east: [], north: [], west: [] },
+    strikeUsed: false, stack: [], log: [], rngSeed: 1,
+  };
+  game = playCard(game, "east", duel.id, "north");
+  for (let guard = 0; guard < 12; guard += 1) {
+    const top = game.stack.at(-1);
+    if (!top || top.kind !== "trick" || !top.awaitingResponse) break;
+    game = respondToTrick(game, top.responders[top.cursor]);
+  }
+  game = respondToDuel(game, "north", strike.id);
+  game = respondToDuel(game, "east");
+  for (let guard = 0; guard < 12; guard += 1) {
+    const top = game.stack.at(-1);
+    if (!top || top.kind !== "dying") break;
+    game = respondToDying(game, top.responders[top.cursor]);
+  }
+  return game;
 }
 
 /** 手工构造一个合法的「聚势被无懈挂起」状态，覆盖 trick 栈的两类帧。 */
@@ -367,6 +421,18 @@ describe("Ding Ding persistence", () => {
     const baseFrame = unavoidable.stack[0] as Extract<DingState["stack"][number], { kind: "strike" }>;
     unavoidable.stack = [{ ...baseFrame, unavoidable: true }, ...unavoidable.stack.slice(1)];
     expect(restoreDingState(unavoidable)).toEqual(unavoidable);
+  });
+
+  it("round-trips a turn whose actor died mid-turn instead of discarding the match", () => {
+    const crafted = craftedDeadActorState();
+    expect(crafted.status).toBe("playing");
+    expect(crafted.activePlayerId).toBe("east");
+    expect(crafted.players[1].alive).toBe(false);
+
+    const restored = restoreDingState(JSON.parse(JSON.stringify(serializeDingState(crafted))));
+    expect(restored).toEqual(crafted);
+    // 恢复出来的状态必须仍能推进：死人回合直接结束，行动权交给下一名存活角色。
+    expect(advancePhase(restored!).activePlayerId).toBe("north");
   });
 
   it("round-trips a nested trick stack with a suspended frame and a nullify frame", () => {

@@ -87,13 +87,26 @@ function replacePlayer(players: readonly DingPlayer[], id: PlayerId, update: (pl
   return players.map((player) => player.id === id ? update(player) : player);
 }
 
+/**
+ * 跨回合保留的标记。其余标记都只在设置它的那个回合内有效。
+ *
+ * - `buff:next-damage-reduction`（坚壁）：持续到拥有者下个回合开始；
+ * - `silenced`（绝弦）：永久失效，不再恢复；
+ * - `delay:*`（困局与断锋/困阵）：由**被指定角色**在自己回合的摸牌阶段消费，
+ *   因此必须活过设置它的那个回合的结束，否则技能对其他角色永远不会生效。
+ */
+function isCarryOverFlag(flag: string): boolean {
+  return flag === buffFlag("next-damage-reduction")
+    || flag === "silenced"
+    || flag.startsWith("delay:");
+}
+
 function resetSkillFlags(players: readonly DingPlayer[]): DingPlayer[] {
-  // 「坚壁」的减伤持续到拥有者下个回合开始，不随当前回合结束清空。
-  const damageReduction = buffFlag("next-damage-reduction");
   return players.map((player) => {
     const skillFlags: Record<string, boolean> = {};
-    if (player.skillFlags[damageReduction] === true) skillFlags[damageReduction] = true;
-    if (player.skillFlags["silenced"] === true) skillFlags.silenced = true;
+    for (const [flag, value] of Object.entries(player.skillFlags)) {
+      if (value === true && isCarryOverFlag(flag)) skillFlags[flag] = true;
+    }
     return Object.keys(player.skillFlags).length === Object.keys(skillFlags).length
       ? player
       : { ...player, skillFlags };

@@ -1,5 +1,5 @@
 import { CARD_CATALOG, SEAT_ORDER, buildDeck } from "./data";
-import { evaluateWinner, getPlayer } from "./engine";
+import { evaluateWinner } from "./engine";
 import { HERO_IDS, heroOf } from "./heroes";
 import {
   createDefaultDingRootState,
@@ -368,9 +368,10 @@ function validateState(data: unknown): data is DingState {
   for (const player of players) {
     if (player.identity === "lord" && !player.revealed) return false;
   }
-  const active = getPlayer(players, data.activePlayerId as PlayerId);
-  if (!active.alive && data.status === "playing") return false;
-
+  // 行动者已退场但对局仍在进行是**合法**状态：焚营在判定阶段致死、约斗反噬等
+  // 都会让当前回合角色死在自己的回合里，`advancePhase` 会把这种“死人回合”
+  // 直接结束并交给下一名存活角色。拒绝它会让这一瞬间写下的存档在重进时
+  // 被整局丢弃，因此这里只校验 activePlayerId 指向真实席位，不校验其存活。
   if (!validateStack(data, data.discard as unknown as readonly DingCard[])) return false;
 
   if (data.status === "finished") {

@@ -563,6 +563,13 @@ describe("Ding Ding engine", () => {
     const delayPending = activateSkill(delayGame, "south", "kunju");
     const delayed = respondToSkill(delayPending, "south", { cardUid: "kunju-cost", targetId: "east" });
     expect(delayed.players[1].skillFlags["delay:skip-play"]).toBe(true);
+    // 标记必须活过设置它的那个回合的结束，否则被指定的角色永远不会真的跳过出牌阶段。
+    const afterSouthTurn = endTurn(delayed, "south");
+    expect(afterSouthTurn.activePlayerId).toBe("east");
+    expect(afterSouthTurn.players[1].skillFlags["delay:skip-play"]).toBe(true);
+    const eastPlay = advancePhase(advancePhase(advancePhase(afterSouthTurn)));
+    expect(eastPlay.phase).toBe("discard");
+    expect(eastPlay.players[1].skillFlags["delay:skip-play"]).toBe(false);
 
     const healGame = state({}, [
       player("south", { heroId: "panwei", hp: 3, maxHp: 5 }),
