@@ -38,7 +38,8 @@ export interface GameRestoredSave {
 
 export interface GamePersistenceHandle {
   readonly restored?: GameRestoredSave;
-  save(schemaVersion: number, revision: number, data: unknown): void;
+  /** Returns false when browser storage is unavailable or full. */
+  save(schemaVersion: number, revision: number, data: unknown): boolean;
   clear(): void;
 }
 

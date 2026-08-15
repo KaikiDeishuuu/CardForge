@@ -1,320 +1,452 @@
 import { describe, expect, it } from "vitest";
-import { chooseAiMove, chooseBestMove } from "./ai";
+import { chooseAiMove, chooseAiResponse, chooseBestMove } from "./ai";
+import { CARD_CATALOG } from "./data";
 import {
+  ACTIONS_PER_TURN,
+  BLOCK_LIMIT,
   DEFAULT_HUMAN_ID,
   HAND_LIMIT,
+  INITIATIVE_ORDER,
+  OVERHEAT_START_ROUND,
   createInitialState,
-  selectableCombatantIds,
+  declineResponse,
+  endTurn,
   getCombatant,
+  getResponseCards,
   getValidTargetIds,
-  hasStatus,
-  passTurn,
   playCard,
+  respondToAttack,
+  selectableCombatantIds,
 } from "./engine";
 import type { CardInstance, Combatant, EmberPactState } from "./types";
 
 const fixedRandom = () => 0.42;
 
-function updateActor(
+function updateCombatant(
   state: EmberPactState,
-  actorId: string,
+  combatantId: string,
   update: Partial<Combatant>,
 ): EmberPactState {
   return {
     ...state,
-    combatants: state.combatants.map((actor) => actor.id === actorId ? { ...actor, ...update } : actor),
+    combatants: state.combatants.map((combatant) =>
+      combatant.id === combatantId ? { ...combatant, ...update } : combatant),
   };
 }
 
-function giveCard(
+function testCard(ownerId: string, definitionId: string, index = 0): CardInstance {
+  return { uid: `test-${ownerId}-${definitionId}-${index}`, definitionId };
+}
+
+function setHand(
+  state: EmberPactState,
+  combatantId: string,
+  definitionIds: readonly string[],
+): EmberPactState {
+  return updateCombatant(state, combatantId, {
+    hand: definitionIds.map((definitionId, index) => testCard(combatantId, definitionId, index)),
+  });
+}
+
+function startTurn(
+  state: EmberPactState,
+  actorId: string,
+  definitionIds: readonly string[],
+): EmberPactState {
+  return setHand({
+    ...state,
+    activePlayerId: actorId,
+    actionsRemaining: ACTIONS_PER_TURN,
+    attackUsed: false,
+    phase: "action",
+    pendingAttack: undefined,
+  }, actorId, definitionIds);
+}
+
+function playNamedCard(
   state: EmberPactState,
   actorId: string,
   definitionId: string,
-): { state: EmberPactState; card: CardInstance } {
-  const card = { uid: `test-${actorId}-${definitionId}-${state.revision}`, definitionId };
-  const actor = getCombatant(state, actorId)!;
-  return { state: updateActor(state, actorId, { hand: [card, ...actor.hand] }), card };
+  targetId: string,
+): EmberPactState {
+  const instance = getCombatant(state, actorId)?.hand.find((card) => card.definitionId === definitionId);
+  if (!instance) throw new Error(`${actorId} does not hold ${definitionId}`);
+  return playCard(state, actorId, instance.uid, targetId);
+}
+
+function seededRandom(seed: number): () => number {
+  let value = seed;
+  return () => {
+    value = (value * 16_807) % 2_147_483_647;
+    return value / 2_147_483_647;
+  };
+}
+
+function directDamage(definitionId: string): number {
+  return CARD_CATALOG[definitionId].effects.find((effect) => effect.kind === "damage")?.amount ?? 0;
+}
+
+function driveBotDecision(state: EmberPactState): EmberPactState {
+  if (state.phase === "response") {
+    const responderId = state.pendingAttack?.targetId;
+    if (!responderId) throw new Error("response phase requires a responder");
+    const responseUid = chooseAiResponse(state, responderId, state.difficulty);
+    return responseUid
+      ? respondToAttack(state, responderId, responseUid)
+      : declineResponse(state, responderId);
+  }
+
+  const move = chooseBestMove(state, state.activePlayerId);
+  return move
+    ? playCard(state, state.activePlayerId, move.cardUid, move.targetId)
+    : endTurn(state, state.activePlayerId);
 }
 
 describe("Ember Pact engine", () => {
-  it("starts four asymmetric combatants with four cards", () => {
+  it("starts the standard four-seat battle with two actions", () => {
     const state = createInitialState(fixedRandom);
+
     expect(state.combatants).toHaveLength(4);
-    expect(state.combatants.every((actor) => actor.hand.length === 4)).toBe(true);
-    expect(state.combatants.map((actor) => actor.maxHp)).toEqual([24, 20, 25, 21]);
-    expect(new Set(state.combatants.map((actor) => actor.passiveId)).size).toBe(4);
-    expect(state.roundNumber).toBe(1);
+    expect(state.combatants.every((combatant) => combatant.hand.length === 4)).toBe(true);
+    expect(state.combatants.every((combatant) => combatant.maxHp > 0 && combatant.hp === combatant.maxHp)).toBe(true);
+    expect(state.combatants.map((combatant) => combatant.team)).toEqual(["dawn", "dawn", "dusk", "dusk"]);
+    expect(state.activePlayerId).toBe(INITIATIVE_ORDER[0]);
+    expect(state.actionsRemaining).toBe(2);
+    expect(state.attackUsed).toBe(false);
+    expect(state.phase).toBe("action");
+    expect(Object.keys(state.metrics).sort()).toEqual(["ember", "luna", "player", "scar"]);
   });
 
-  it("seats the human on any chosen combatant and leaves the rest to the AI", () => {
+  it("lets the human control any seat without changing the initiative order", () => {
     const asScar = createInitialState(fixedRandom, "scar");
     expect(getCombatant(asScar, "scar")?.controller).toBe("human");
     expect(getCombatant(asScar, "player")?.controller).toBe("ai");
-    expect(asScar.combatants.filter((actor) => actor.controller === "human")).toHaveLength(1);
-    expect(getCombatant(asScar, "scar")?.team).toBe("dusk");
+    expect(asScar.combatants.filter((combatant) => combatant.controller === "human")).toHaveLength(1);
+    expect(asScar.activePlayerId).toBe("player");
 
-    const fallback = createInitialState(fixedRandom, "nobody");
+    const fallback = createInitialState(fixedRandom, "unknown");
     expect(getCombatant(fallback, DEFAULT_HUMAN_ID)?.controller).toBe("human");
     expect(selectableCombatantIds()).toEqual(["player", "luna", "scar", "ember"]);
   });
 
-  it("drains with siphon and shields with aegis", () => {
-    const drained = updateActor(createInitialState(fixedRandom), "player", { hp: 18 });
-    const siphon = giveCard(drained, "player", "siphon");
-    const drain = playCard(siphon.state, "player", siphon.card.uid, "scar");
-    expect(getCombatant(drain, "scar")?.hp).toBe(22);
-    expect(getCombatant(drain, "player")?.hp).toBe(20);
+  it("allows two cards but limits attack cards to one per turn", () => {
+    let state = startTurn(createInitialState(fixedRandom), "player", ["sever", "sever", "fracture"]);
+    state = setHand(state, "scar", []);
+    const startingHp = getCombatant(state, "scar")!.hp;
 
-    // 护盾在目标下一次行动开始时清空，所以挡在自己身上才留得住。
-    const exposed = updateActor(createInitialState(fixedRandom), "player", { statuses: [{ id: "exposed" }] });
-    const aegis = giveCard(exposed, "player", "aegis");
-    const shielded = playCard(aegis.state, "player", aegis.card.uid, "player");
-    expect(getCombatant(shielded, "player")?.block).toBe(4);
-    expect(hasStatus(getCombatant(shielded, "player")!, "exposed")).toBe(false);
+    const firstAttack = getCombatant(state, "player")!.hand[0];
+    state = playCard(state, "player", firstAttack.uid, "scar");
+    expect(state.activePlayerId).toBe("player");
+    expect(state.actionsRemaining).toBe(1);
+    expect(state.attackUsed).toBe(true);
+
+    const secondAttack = getCombatant(state, "player")!.hand.find((card) => card.definitionId === "sever")!;
+    expect(getValidTargetIds(state, "player", secondAttack.uid)).toEqual([]);
+    expect(playCard(state, "player", secondAttack.uid, "scar")).toBe(state);
+
+    state = playNamedCard(state, "player", "fracture", "scar");
+    expect(getCombatant(state, "scar")?.hp)
+      .toBe(startingHp - directDamage("sever") - directDamage("fracture"));
+    expect(state.activePlayerId).toBe("scar");
+    expect(state.actionsRemaining).toBe(ACTIONS_PER_TURN);
+    expect(state.attackUsed).toBe(false);
   });
 
-  it("lights a single-turn burn with emberwind", () => {
-    const emberTurn = { ...createInitialState(fixedRandom), activePlayerId: "ember" };
-    const wind = giveCard(emberTurn, "ember", "emberwind");
-    const burned = playCard(wind.state, "ember", wind.card.uid, "player");
+  it("automatically rotates after the second one-cost action", () => {
+    let state = startTurn(createInitialState(fixedRandom), "player", ["plate", "fracture"]);
+    state = playNamedCard(state, "player", "plate", "player");
+    expect(state.activePlayerId).toBe("player");
+    expect(state.actionsRemaining).toBe(1);
 
-    expect(getCombatant(burned, "player")?.hp).toBe(22);
-    expect(getCombatant(burned, "player")?.statuses.find((status) => status.id === "burning")?.remainingTurns).toBe(1);
+    state = playNamedCard(state, "player", "fracture", "scar");
+    expect(state.activePlayerId).toBe("scar");
+    expect(state.turnNumber).toBe(2);
+    expect(state.actionsRemaining).toBe(2);
   });
 
-  it("validates enemy, ally and self target rules", () => {
-    const initial = createInitialState(fixedRandom);
-    const attack = giveCard(initial, "player", "sever");
-    expect([...getValidTargetIds(attack.state, "player", attack.card.uid)].sort()).toEqual(["ember", "scar"]);
+  it("rotates in an interleaved team order and increments rounds only on wrap", () => {
+    let state = createInitialState(fixedRandom);
+    const observed = [state.activePlayerId];
 
-    const temper = giveCard(initial, "player", "temper");
-    expect(getValidTargetIds(temper.state, "player", temper.card.uid)).toEqual(["player"]);
+    for (let count = 0; count < 4; count += 1) {
+      state = endTurn(state, state.activePlayerId);
+      observed.push(state.activePlayerId);
+    }
+
+    expect(observed).toEqual(["player", "scar", "luna", "ember", "player"]);
+    expect(state.roundNumber).toBe(2);
+
+    const withoutScar = updateCombatant(createInitialState(fixedRandom), "scar", { hp: 0 });
+    expect(endTurn(withoutScar, "player").activePlayerId).toBe("luna");
   });
 
-  it("resolves direct damage and advances to the AI teammate", () => {
-    const setup = giveCard(createInitialState(fixedRandom), "player", "sever");
-    const next = playCard(setup.state, "player", setup.card.uid, "scar");
-    expect(getCombatant(next, "scar")?.hp).toBe(22);
-    expect(next.activePlayerId).toBe("luna");
-    expect(next.revision).toBe(1);
-  });
-
-  it("applies and consumes exposed on the next direct attack", () => {
-    const fracture = giveCard(createInitialState(fixedRandom), "player", "fracture");
-    const exposed = playCard(fracture.state, "player", fracture.card.uid, "scar");
-    expect(hasStatus(getCombatant(exposed, "scar")!, "exposed")).toBe(true);
-
-    const playerAgain = { ...exposed, activePlayerId: "player" };
-    const sever = giveCard(playerAgain, "player", "sever");
-    const hit = playCard(sever.state, "player", sever.card.uid, "scar");
-    expect(getCombatant(hit, "scar")?.hp).toBe(19);
-    expect(hasStatus(getCombatant(hit, "scar")!, "exposed")).toBe(false);
-  });
-
-  it("ticks burning twice at the end of the affected actor's turns", () => {
-    const cinder = giveCard(createInitialState(fixedRandom), "player", "cinder");
-    const burning = playCard(cinder.state, "player", cinder.card.uid, "scar");
-    expect(hasStatus(getCombatant(burning, "scar")!, "burning")).toBe(true);
-
-    const firstTick = passTurn({ ...burning, activePlayerId: "scar" }, "scar");
-    expect(getCombatant(firstTick, "scar")?.hp).toBe(22);
-    expect(getCombatant(firstTick, "scar")?.statuses.find((status) => status.id === "burning")?.remainingTurns).toBe(1);
-
-    const secondTick = passTurn({ ...firstTick, activePlayerId: "scar" }, "scar");
-    expect(getCombatant(secondTick, "scar")?.hp).toBe(20);
-    expect(hasStatus(getCombatant(secondTick, "scar")!, "burning")).toBe(false);
-  });
-
-  it("keeps an untimed burn alight until it is cleansed", () => {
-    const initial = updateActor(createInitialState(fixedRandom), "player", {
-      statuses: [{ id: "burning" }],
+  it("allows the actor to end early and settles end-of-turn effects once", () => {
+    let state = startTurn(createInitialState(fixedRandom), "player", ["plate", "fracture"]);
+    state = updateCombatant(state, "player", {
+      statuses: [{ id: "burning", remainingTurns: 2, sourceActorId: "ember" }],
     });
-    const firstTick = passTurn(initial, "player");
-    expect(getCombatant(firstTick, "player")?.hp).toBe(22);
-    expect(hasStatus(getCombatant(firstTick, "player")!, "burning")).toBe(true);
+    state = playNamedCard(state, "player", "plate", "player");
+    const beforeEnd = getCombatant(state, "player")!.hp;
 
-    // 没有剩余回合的灼烧与「破绽」「蓄势」一样是永久的，不会自己熄灭。
-    const laterTick = passTurn({ ...firstTick, activePlayerId: "player" }, "player");
-    expect(hasStatus(getCombatant(laterTick, "player")!, "burning")).toBe(true);
+    state = endTurn(state, "player");
+    const burnEvent = state.lastAction?.events.find((event) => event.kind === "damage" && event.source === "status");
+    expect(burnEvent?.amount).toBeGreaterThan(0);
+    expect(getCombatant(state, "player")?.hp).toBe(beforeEnd - (burnEvent?.amount ?? 0));
+    expect(getCombatant(state, "player")?.statuses.find((status) => status.id === "burning")?.remainingTurns).toBe(1);
+    expect(state.activePlayerId).toBe("scar");
+    expect(state.lastAction?.events.filter((event) => event.kind === "damage")).toHaveLength(1);
   });
 
-  it("renews a burn when cinder lands on an already burning target", () => {
-    const weakened = updateActor(createInitialState(fixedRandom), "scar", {
-      statuses: [{ id: "burning", remainingTurns: 1 }],
+  it("attributes a burning defeat to its status source", () => {
+    let state = startTurn(createInitialState(fixedRandom), "player", []);
+    state = updateCombatant(state, "player", {
+      hp: 2,
+      statuses: [{ id: "burning", remainingTurns: 1, sourceActorId: "ember" }],
     });
-    const cinder = giveCard(weakened, "player", "cinder");
-    const renewed = playCard(cinder.state, "player", cinder.card.uid, "scar");
-    expect(getCombatant(renewed, "scar")?.statuses.find((status) => status.id === "burning")?.remainingTurns).toBe(2);
+
+    state = endTurn(state, "player");
+
+    expect(getCombatant(state, "player")?.hp).toBe(0);
+    expect(state.lastAction?.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "defeated",
+        targetId: "player",
+        actorId: "ember",
+        source: "status",
+      }),
+    ]));
   });
 
-  it("triggers Furnace Heart and Afterglow passives", () => {
-    const plate = giveCard(createInitialState(fixedRandom), "player", "plate");
-    const guarded = playCard(plate.state, "player", plate.card.uid, "player");
-    expect(getCombatant(guarded, "player")?.block).toBe(5);
-    expect(hasStatus(getCombatant(guarded, "player")!, "tempered")).toBe(true);
+  it("keeps shields between turns and caps them at the configured limit", () => {
+    let state = startTurn(createInitialState(fixedRandom), "player", ["plate", "plate"]);
+    state = playNamedCard(state, "player", "plate", "player");
+    state = playNamedCard(state, "player", "plate", "player");
 
-    let lunaTurn = { ...createInitialState(fixedRandom), activePlayerId: "luna" };
-    lunaTurn = updateActor(lunaTurn, "player", { hp: 10 });
-    const heal = giveCard(lunaTurn, "luna", "rekindle");
-    const restored = playCard(heal.state, "luna", heal.card.uid, "player");
-    expect(getCombatant(restored, "player")?.hp).toBe(14);
-    expect(getCombatant(restored, "player")?.block).toBe(2);
+    expect(getCombatant(state, "player")?.block).toBe(BLOCK_LIMIT);
+    expect(state.activePlayerId).toBe("scar");
+
+    state = endTurn(state, "scar");
+    state = endTurn(state, "luna");
+    state = endTurn(state, "ember");
+    expect(state.activePlayerId).toBe("player");
+    expect(getCombatant(state, "player")?.block).toBe(BLOCK_LIMIT);
   });
 
-  it("triggers Siegebreaker and Firehunt damage bonuses", () => {
-    let scarTurn = { ...createInitialState(fixedRandom), activePlayerId: "scar" };
-    scarTurn = updateActor(scarTurn, "player", { block: 5 });
-    const scarAttack = giveCard(scarTurn, "scar", "sever");
-    const breached = playCard(scarAttack.state, "scar", scarAttack.card.uid, "player");
-    expect(getCombatant(breached, "player")?.block).toBe(0);
-    expect(getCombatant(breached, "player")?.hp).toBe(24);
+  it("pauses for Deflect, then returns the decision to the original actor", () => {
+    let state = startTurn(createInitialState(fixedRandom), "player", ["sever", "fracture"]);
+    state = setHand(state, "scar", ["deflect"]);
+    const startingHp = getCombatant(state, "scar")!.hp;
 
-    let emberTurn = { ...createInitialState(fixedRandom), activePlayerId: "ember" };
-    emberTurn = updateActor(emberTurn, "player", { statuses: [{ id: "burning", remainingTurns: 2 }] });
-    const emberAttack = giveCard(emberTurn, "ember", "sever");
-    const hunted = playCard(emberAttack.state, "ember", emberAttack.card.uid, "player");
-    expect(getCombatant(hunted, "player")?.hp).toBe(19);
+    state = playNamedCard(state, "player", "sever", "scar");
+    expect(state.phase).toBe("response");
+    expect(state.activePlayerId).toBe("player");
+    expect(state.pendingAttack).toMatchObject({ actorId: "player", targetId: "scar", definitionId: "sever" });
+    expect(getCombatant(state, "scar")?.hp).toBe(startingHp);
+
+    const response = getResponseCards(state, "scar")[0];
+    state = respondToAttack(state, "scar", response.uid);
+    expect(state.phase).toBe("action");
+    expect(state.pendingAttack).toBeUndefined();
+    expect(state.activePlayerId).toBe("player");
+    expect(state.actionsRemaining).toBe(1);
+    const prevented = Math.min(CARD_CATALOG.deflect.responsePower ?? 0, directDamage("sever"));
+    expect(getCombatant(state, "scar")?.hp).toBe(startingHp - directDamage("sever") + prevented);
+    expect(state.lastAction?.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "response", targetId: "scar" }),
+      expect.objectContaining({
+        kind: "damage",
+        targetId: "scar",
+        amount: directDamage("sever") - prevented,
+        prevented,
+      }),
+    ]));
+    expect(state.metrics.scar.responses).toBe(1);
+    expect(state.log.filter((entry) => entry.text.includes("准备化解 4 点伤害"))).toHaveLength(1);
   });
 
-  it("does not brand a target its own earlier effect defeated", () => {
-    const weakened = updateActor(createInitialState(fixedRandom), "scar", { hp: 1 });
-    const cinder = giveCard(weakened, "player", "cinder");
-    const result = playCard(cinder.state, "player", cinder.card.uid, "scar");
+  it("can decline a response without losing the response card", () => {
+    let state = startTurn(createInitialState(fixedRandom), "player", ["sever", "fracture"]);
+    state = setHand(state, "scar", ["deflect"]);
+    const startingHp = getCombatant(state, "scar")!.hp;
+    state = playNamedCard(state, "player", "sever", "scar");
 
-    expect(getCombatant(result, "scar")?.hp).toBe(0);
-    expect(hasStatus(getCombatant(result, "scar")!, "burning")).toBe(false);
-    expect(result.lastAction?.events.some((event) => event.kind === "status-applied")).toBe(false);
+    const beforeHand = getCombatant(state, "scar")!.hand;
+    state = declineResponse(state, "scar");
+    expect(state.phase).toBe("action");
+    expect(state.activePlayerId).toBe("player");
+    expect(state.actionsRemaining).toBe(1);
+    expect(getCombatant(state, "scar")?.hp).toBe(startingHp - directDamage("sever"));
+    expect(getCombatant(state, "scar")?.hand).toEqual(beforeHand);
+    expect(state.metrics.scar.responses).toBe(0);
   });
 
-  it("stays quiet when a heal restores nothing but still pays the passive", () => {
-    const lunaTurn = { ...createInitialState(fixedRandom), activePlayerId: "luna" };
-    const heal = giveCard(lunaTurn, "luna", "rekindle");
-    const result = playCard(heal.state, "luna", heal.card.uid, "player");
-
-    expect(getCombatant(result, "player")?.hp).toBe(24);
-    expect(result.lastAction?.events.some((event) => event.kind === "heal")).toBe(false);
-    expect(getCombatant(result, "player")?.block).toBe(2);
-  });
-
-  it("cleanses harmful statuses while healing", () => {
-    let state = updateActor(createInitialState(fixedRandom), "player", {
-      hp: 20,
-      statuses: [{ id: "exposed" }, { id: "burning", remainingTurns: 2 }],
+  it("lets a restore card return a defeated ally to the initiative", () => {
+    let state = startTurn(createInitialState(fixedRandom), "luna", ["rekindle", "fracture"]);
+    state = updateCombatant(state, "player", {
+      hp: 0,
+      block: 7,
+      statuses: [
+        { id: "burning", remainingTurns: 2, sourceActorId: "ember" },
+        { id: "tempered", sourceActorId: "luna" },
+      ],
     });
-    const refine = giveCard(state, "player", "refine");
-    state = playCard(refine.state, "player", refine.card.uid, "player");
-    expect(getCombatant(state, "player")?.hp).toBe(22);
-    expect(getCombatant(state, "player")?.statuses).toEqual([]);
+
+    const rescue = getCombatant(state, "luna")!.hand[0];
+    expect(getValidTargetIds(state, "luna", rescue.uid)).toContain("player");
+    state = playCard(state, "luna", rescue.uid, "player");
+
+    expect(getCombatant(state, "player")?.hp).toBe(3);
+    expect(getCombatant(state, "player")?.block).toBeGreaterThan(0);
+    expect(getCombatant(state, "player")?.statuses).toEqual([
+      { id: "tempered", sourceActorId: "luna" },
+    ]);
+    expect(state.lastAction?.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "revive", targetId: "player", amount: 3, combo: true }),
+    ]));
+    expect(state.metrics.luna.healingDone).toBe(3);
+
+    state = startTurn(updateCombatant(state, "player", { hp: 0 }), "luna", ["rekindle"]);
+    const secondRescue = getCombatant(state, "luna")!.hand[0];
+    expect(getCombatant(state, "player")?.reviveAvailable).toBe(false);
+    expect(getValidTargetIds(state, "luna", secondRescue.uid)).not.toContain("player");
+    expect(playCard(state, "luna", secondRescue.uid, "player")).toBe(state);
   });
 
-  it("starts escalating unblocked overheat at round thirteen", () => {
-    const state = { ...createInitialState(fixedRandom), roundNumber: 13 };
-    const next = passTurn(state, "player");
-    expect(getCombatant(next, "player")?.hp).toBe(23);
-    expect(next.lastAction?.events.some((event) => event.kind === "overheat" && event.amount === 1)).toBe(true);
+  it("records cross-seat coordination in both events and metrics", () => {
+    let state = startTurn(createInitialState(fixedRandom), "player", ["rally", "fracture"]);
+    state = playNamedCard(state, "player", "rally", "luna");
+
+    expect(state.lastAction?.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "block", targetId: "luna", combo: true }),
+      expect.objectContaining({ kind: "status-applied", targetId: "luna", combo: true }),
+    ]));
+    expect(state.metrics.player).toMatchObject({ cardsPlayed: 1, blockGranted: 2, combos: 1 });
   });
 
-  it("discards the next draw when the incoming actor has a full hand", () => {
-    const initial = createInitialState(fixedRandom);
-    const luna = getCombatant(initial, "luna")!;
-    const filler = Array.from({ length: HAND_LIMIT }, (_, index) => ({ uid: `full-${index}`, definitionId: "sever" }));
-    const state = updateActor(initial, "luna", { hand: filler });
-    const next = passTurn(state, "player");
-    expect(getCombatant(next, "luna")?.hand).toHaveLength(HAND_LIMIT);
-    expect(getCombatant(next, "luna")?.discard).toHaveLength(luna.discard.length + 1);
-    expect(next.lastAction?.events.some((event) => event.kind === "card-overflow")).toBe(true);
+  it("does not emit the same tempered application twice", () => {
+    let state = startTurn(createInitialState(fixedRandom), "player", ["temper"]);
+
+    state = playNamedCard(state, "player", "temper", "player");
+
+    expect(state.lastAction?.events.filter((event) =>
+      event.kind === "status-applied" && event.statusId === "tempered"
+    )).toHaveLength(1);
   });
 
-  it("reshuffles an exhausted deck instead of dealing the discard back in order", () => {
-    const base = createInitialState(fixedRandom);
-    const source = getCombatant(base, "player")!;
-    const pile = [...source.deck, ...source.hand];
-    const emptied = updateActor(base, "player", { deck: [], discard: pile, hand: [] });
-
-    // ember acts last, so the turn wraps to player, whose draw must recycle.
-    const recycledOrder = (rngSeed: number) => {
-      const next = passTurn({ ...emptied, activePlayerId: "ember", rngSeed }, "ember");
-      const after = getCombatant(next, "player")!;
-      return [...after.deck, ...after.hand].map((card) => card.uid);
+  it("applies global true-damage overheat to every living seat on round wrap", () => {
+    let state = startTurn(createInitialState(fixedRandom), "ember", []);
+    state = {
+      ...state,
+      roundNumber: OVERHEAT_START_ROUND - 1,
+      combatants: state.combatants.map((combatant) => ({ ...combatant, hp: 5, block: BLOCK_LIMIT })),
     };
 
-    const order = recycledOrder(7);
-    expect(order).toHaveLength(pile.length);
-    expect([...order].sort()).toEqual(pile.map((card) => card.uid).sort());
-    expect(order, "must not simply replay the discard pile backwards")
-      .not.toEqual([...pile].reverse().map((card) => card.uid));
-    expect(order, "the same seed must reproduce the exact shuffle")
-      .toEqual(recycledOrder(7));
-    expect(order, "a different seed must produce a different shuffle")
-      .not.toEqual(recycledOrder(99));
+    state = endTurn(state, "ember");
+    expect(state.roundNumber).toBe(OVERHEAT_START_ROUND);
+    expect(state.combatants.map((combatant) => combatant.hp)).toEqual([4, 4, 4, 4]);
+    expect(state.combatants.every((combatant) => combatant.block === BLOCK_LIMIT)).toBe(true);
+    expect(state.lastAction?.events.filter((event) => event.kind === "overheat")).toHaveLength(4);
   });
 
-  it("lets the scored AI choose a legal move and prefer a match-winning attack", () => {
-    const aiTurn = passTurn(createInitialState(fixedRandom), "player");
-    const legalMove = chooseAiMove(aiTurn, "luna");
-    expect(legalMove).toBeDefined();
-    expect(getValidTargetIds(aiTurn, "luna", legalMove!.cardUid)).toContain(legalMove!.targetId);
+  it("has the AI spend Deflect against lethal incoming damage", () => {
+    let state = startTurn(createInitialState(fixedRandom), "player", ["sever"]);
+    state = setHand(state, "scar", ["deflect"]);
+    state = updateCombatant(state, "scar", { hp: 2 });
+    state = playNamedCard(state, "player", "sever", "scar");
 
-    let decisive = { ...createInitialState(fixedRandom), activePlayerId: "scar" };
-    decisive = updateActor(decisive, "player", { hp: 2 });
-    decisive = updateActor(decisive, "luna", { hp: 0 });
-    decisive = updateActor(decisive, "scar", { hand: [] });
-    const attack = giveCard(decisive, "scar", "sever");
-    const guard = giveCard(attack.state, "scar", "plate");
-    const choice = chooseAiMove(guard.state, "scar");
-    expect(choice).toEqual({ cardUid: attack.card.uid, targetId: "player" });
+    const responseUid = chooseAiResponse(state, "scar");
+    expect(responseUid).toBe(getCombatant(state, "scar")?.hand[0].uid);
+    state = respondToAttack(state, "scar", responseUid);
+    expect(getCombatant(state, "scar")?.hp).toBe(1);
+    expect(state.status).toBe("playing");
   });
 
-  it("marks defeated actors and completes the match", () => {
-    let decisive = createInitialState(fixedRandom);
-    decisive = updateActor(decisive, "scar", { hp: 2 });
-    decisive = updateActor(decisive, "ember", { hp: 0 });
-    const attack = giveCard(decisive, "player", "sever");
-    const result = playCard(attack.state, "player", attack.card.uid, "scar");
-    expect(getCombatant(result, "scar")?.hp).toBe(0);
-    expect(result.status).toBe("finished");
-    expect(result.winner).toBe("dawn");
+  it("has the AI preserve Deflect when it cannot prevent defeat", () => {
+    let state = startTurn(createInitialState(fixedRandom), "player", ["sever"]);
+    state = setHand(state, "scar", ["deflect"]);
+    state = updateCombatant(state, "scar", { hp: 1 });
+    state = playNamedCard(state, "player", "sever", "scar");
+
+    expect(chooseAiResponse(state, "scar")).toBeUndefined();
+    const beforeHand = getCombatant(state, "scar")!.hand;
+    state = declineResponse(state, "scar");
+    expect(getCombatant(state, "scar")?.hp).toBe(0);
+    expect(getCombatant(state, "scar")?.hand).toEqual(beforeHand);
   });
 
-  it("rejects illegal, out-of-turn and post-match actions", () => {
-    const setup = giveCard(createInitialState(fixedRandom), "player", "sever");
-    expect(playCard(setup.state, "player", setup.card.uid, "luna")).toBe(setup.state);
-    expect(playCard(setup.state, "luna", setup.card.uid, "player")).toBe(setup.state);
+  it("ends the turn instead of proactively spending the final Deflect for no value", () => {
+    let state = startTurn(createInitialState(fixedRandom), "scar", ["deflect"]);
+    state = updateCombatant(state, "scar", { block: BLOCK_LIMIT });
 
-    const finished: EmberPactState = { ...setup.state, status: "finished", winner: "dawn" };
-    expect(playCard(finished, "player", setup.card.uid, "scar")).toBe(finished);
-    expect(passTurn(finished, "player")).toBe(finished);
+    expect(chooseAiMove(state, "scar", "tactician")).toBeUndefined();
   });
 
-  it("skips defeated actors and increments the round only when order wraps", () => {
-    let state = updateActor(createInitialState(fixedRandom), "luna", { hp: 0 });
-    state = passTurn(state, "player");
-    expect(state.activePlayerId).toBe("scar");
-    expect(state.roundNumber).toBe(1);
+  it("values breaking enemy block even when the hit deals no health damage", () => {
+    let state = startTurn(createInitialState(fixedRandom), "scar", ["sever"]);
+    state = updateCombatant(state, "player", { block: BLOCK_LIMIT, hand: [] });
+    state = updateCombatant(state, "luna", { hp: 0 });
 
-    state = { ...state, activePlayerId: "ember" };
-    state = passTurn(state, "ember");
-    expect(state.activePlayerId).toBe("player");
-    expect(state.roundNumber).toBe(2);
+    const move = chooseAiMove(state, "scar", "standard");
+    expect(move).toMatchObject({ targetId: "player" });
+    const resolved = playCard(state, "scar", move!.cardUid, move!.targetId);
+    expect(getCombatant(resolved, "player")).toMatchObject({ hp: 19, block: 0 });
   });
 
-  it("guarantees deterministic bot matches terminate through overheat", () => {
-    for (let seed = 1; seed <= 6; seed += 1) {
-      let value = seed;
-      const random = () => {
-        value = (value * 16_807) % 2_147_483_647;
-        return value / 2_147_483_647;
-      };
-      let state = createInitialState(random);
-      let actions = 0;
-      while (state.status === "playing" && actions < 200) {
-        const move = chooseBestMove(state, state.activePlayerId);
-        state = move
-          ? playCard(state, state.activePlayerId, move.cardUid, move.targetId)
-          : passTurn(state, state.activePlayerId);
-        actions += 1;
+  it("cycles a non-response card when a full hand would otherwise lock future draws", () => {
+    const fullHand = Array.from({ length: HAND_LIMIT }, () => "rekindle");
+    const state = startTurn(createInitialState(fixedRandom), "scar", fullHand);
+
+    const move = chooseAiMove(state, "scar", "standard");
+    expect(move).toBeDefined();
+    expect(getCombatant(state, "scar")?.hand.find((card) => card.uid === move?.cardUid)?.definitionId)
+      .toBe("rekindle");
+  });
+
+  it("rejects illegal, out-of-turn, response-phase, and post-match actions", () => {
+    let state = startTurn(createInitialState(fixedRandom), "player", ["sever", "fracture"]);
+    state = setHand(state, "scar", ["deflect", "plate"]);
+    const attack = getCombatant(state, "player")!.hand[0];
+
+    expect(playCard(state, "player", attack.uid, "luna")).toBe(state);
+    expect(playCard(state, "scar", attack.uid, "player")).toBe(state);
+    expect(endTurn(state, "scar")).toBe(state);
+    expect(respondToAttack(state, "scar", getCombatant(state, "scar")!.hand[0].uid)).toBe(state);
+
+    const waiting = playCard(state, "player", attack.uid, "scar");
+    expect(endTurn(waiting, "player")).toBe(waiting);
+    expect(declineResponse(waiting, "ember")).toBe(waiting);
+    expect(respondToAttack(waiting, "scar", getCombatant(waiting, "scar")!.hand[1].uid)).toBe(waiting);
+
+    const finished: EmberPactState = { ...state, status: "finished", winner: "dawn" };
+    expect(playCard(finished, "player", attack.uid, "scar")).toBe(finished);
+    expect(endTurn(finished, "player")).toBe(finished);
+  });
+
+  it("finishes deterministic all-bot matches while resolving response phases", () => {
+    const outcomes: string[] = [];
+    for (let seed = 1; seed <= 12; seed += 1) {
+      let state = createInitialState(seededRandom(seed));
+      let decisions = 0;
+      while (state.status === "playing" && decisions < 400) {
+        state = driveBotDecision(state);
+        decisions += 1;
       }
-      expect(state.status, `seed ${seed} after ${actions} actions`).toBe("finished");
+
+      expect(state.status, `seed ${seed} after ${decisions} decisions`).toBe("finished");
+      expect(state.winner).toMatch(/^(dawn|dusk|draw)$/);
+      outcomes.push(`${state.winner}:${state.roundNumber}:${decisions}`);
     }
+
+    const replayed: string[] = [];
+    for (let seed = 1; seed <= 12; seed += 1) {
+      let state = createInitialState(seededRandom(seed));
+      let decisions = 0;
+      while (state.status === "playing" && decisions < 400) {
+        state = driveBotDecision(state);
+        decisions += 1;
+      }
+      replayed.push(`${state.winner}:${state.roundNumber}:${decisions}`);
+    }
+    expect(replayed).toEqual(outcomes);
   });
 });

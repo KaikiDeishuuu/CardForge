@@ -8,6 +8,8 @@ interface CardFrameProps {
   tone?: string;
   selected?: boolean;
   disabled?: boolean;
+  /** Keeps the card focusable so its caller can explain why the move is unavailable. */
+  ariaDisabled?: boolean;
   onClick?: () => void;
   className?: string;
 }
@@ -20,6 +22,7 @@ export function CardFrame({
   tone = "#b84b3d",
   selected = false,
   disabled = false,
+  ariaDisabled = false,
   onClick,
   className = "",
 }: CardFrameProps) {
@@ -28,9 +31,10 @@ export function CardFrame({
   return (
     <button
       type="button"
-      className={`card-frame ${selected ? "is-selected" : ""} ${className}`}
+      className={`card-frame ${selected ? "is-selected" : ""} ${ariaDisabled ? "is-unavailable" : ""} ${className}`}
       style={style}
       disabled={disabled}
+      aria-disabled={disabled || ariaDisabled}
       onClick={onClick}
       aria-pressed={selected}
     >

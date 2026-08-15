@@ -1,4 +1,14 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
+import {
+  EMBER_PACT_SAVE_KEY,
+  FUTURE_EMBER_PACT_DATA,
+  FUTURE_EMBER_PACT_SCHEMA_VERSION,
+  createFinishedVictoryRoot,
+  createHumanResponseRoot,
+  createTwoActionRoot,
+  installEmberPactSave,
+  installFutureEmberPactSave,
+} from "./emberPactFixtures";
 import { installClassicBettingSave } from "./twentyOneFixtures";
 
 function collectPageErrors(page: Page) {
@@ -23,10 +33,24 @@ async function expectNoDocumentOverflow(page: Page, checkVertical = false) {
   }
 }
 
+async function expectElementWithinViewport(page: Page, locator: Locator) {
+  await expect(locator).toBeVisible();
+  const box = await locator.boundingBox();
+  const viewport = page.viewportSize();
+  expect(box, "元素应具有可测量边界").not.toBeNull();
+  expect(viewport, "测试项目应提供固定视口").not.toBeNull();
+  expect(box!.x, "元素左侧不应超出视口").toBeGreaterThanOrEqual(-1);
+  expect(box!.y, "元素顶部不应超出视口").toBeGreaterThanOrEqual(-1);
+  expect(box!.x + box!.width, "元素右侧不应超出视口").toBeLessThanOrEqual(viewport!.width + 1);
+  expect(box!.y + box!.height, "元素底部不应超出视口").toBeLessThanOrEqual(viewport!.height + 1);
+  const horizontalOverflow = await locator.evaluate((element) => element.scrollWidth - element.clientWidth);
+  expect(horizontalOverflow, "面板内部不应产生横向滚动").toBeLessThanOrEqual(1);
+}
+
 async function enterGame(page: Page, id: "ember-pact" | "twenty-one" | "guandan") {
   await page.goto(`/?game=${id}`);
   const entryLabels = {
-    "ember-pact": "点亮熔炉",
+    "ember-pact": "开始争焰",
     "twenty-one": "入座经典牌桌",
     guandan: "入席开牌",
   } as const;
@@ -37,7 +61,7 @@ test("大厅展示三张独立牌桌且不会横向溢出", async ({ page }) => 
   const assertNoPageErrors = collectPageErrors(page);
   await page.goto("/");
 
-  await expect(page.getByRole("button", { name: /烬契/ })).toBeEnabled();
+  await expect(page.getByRole("button", { name: /争焰/ })).toBeEnabled();
   await expect(page.getByRole("button", { name: /二十一刻/ })).toBeEnabled();
   await expect(page.getByRole("button", { name: /掼蛋/ })).toBeEnabled();
   await expect(page.locator(".featured-game, .planned-game.is-playable")).toHaveCount(3);
@@ -45,14 +69,14 @@ test("大厅展示三张独立牌桌且不会横向溢出", async ({ page }) => 
   assertNoPageErrors();
 });
 
-test("烬契规则弹层、选牌和目标选择可以完成", async ({ page }) => {
+test("争焰规则弹层、选牌和目标选择可以完成", async ({ page }) => {
   const assertNoPageErrors = collectPageErrors(page);
   await page.goto("/?game=ember-pact");
 
-  const dialog = page.getByRole("dialog", { name: /先看炉火/ });
+  const dialog = page.getByRole("dialog", { name: /选择执火者与规则/ });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole("button", { name: /点亮熔炉/ })).toBeFocused();
-  await dialog.getByRole("button", { name: /点亮熔炉/ }).click();
+  await expect(dialog.getByRole("button", { name: /开始争焰/ })).toBeVisible();
+  await dialog.getByRole("button", { name: /开始争焰/ }).click();
 
   const hand = page.getByRole("list", { name: "你的手牌" });
   const chosenCard = hand.getByRole("button").first();
@@ -62,47 +86,184 @@ test("烬契规则弹层、选牌和目标选择可以完成", async ({ page }) 
   const targets = page.getByRole("button", { name: /可选为目标/ });
   await expect(targets.first()).toBeVisible();
   await targets.first().click();
-  await expect(page.getByText(/的行动|正在思考/).first()).toBeVisible();
+  await expect(page.getByText(/还有 1 点行动力|正在判断/).first()).toBeVisible();
   assertNoPageErrors();
 });
 
-test("烬契可以改选出战角色并翻转敌我两行", async ({ page }, testInfo) => {
+test("争焰可以改选出战角色并翻转敌我两行", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "选将与视口无关，只在一个桌面项目验证");
   const assertNoPageErrors = collectPageErrors(page);
   await page.goto("/?game=ember-pact");
 
-  const dialog = page.getByRole("dialog", { name: /先看炉火/ });
+  const dialog = page.getByRole("dialog", { name: /选择执火者与规则/ });
   await expect(page.locator(".team-label--ally span")).toHaveCount(0);
 
   const scar = dialog.getByRole("radio", { name: /铸痕/ });
   await scar.click();
   await expect(scar).toHaveAttribute("aria-checked", "true");
-  await dialog.getByRole("button", { name: /点亮熔炉/ }).click();
+  await dialog.getByRole("button", { name: /开始争焰/ }).click();
 
-  // 铸痕属夜蚀来客，所以己方那一行应当变成夜蚀。
-  await expect(page.locator(".team-label--ally span")).toHaveText("夜蚀来客");
-  await expect(page.locator(".team-label--enemy span")).toHaveText("晨铸同盟");
+  // 铸痕属逐光团，所以己方与敌方两行应随玩家阵营翻转。
+  await expect(page.locator(".team-label--ally span")).toHaveText("逐光团");
+  await expect(page.locator(".team-label--enemy span")).toHaveText("守炉庭");
   assertNoPageErrors();
 });
 
-test("烬契开局后战术炉谱不会重置对局", async ({ page }, testInfo) => {
+test("争焰开局后角色与规则不会重置对局", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "对局锁定与视口无关，只在一个桌面项目验证");
   const assertNoPageErrors = collectPageErrors(page);
   await page.goto("/?game=ember-pact");
-  await page.getByRole("button", { name: /点亮熔炉/ }).click();
+  await page.getByRole("button", { name: /开始争焰/ }).click();
 
   const hand = page.getByRole("list", { name: "你的手牌" });
   await hand.getByRole("button").first().click();
   await page.getByRole("button", { name: /可选为目标/ }).first().click();
   await expect(hand.getByRole("button")).toHaveCount(3);
 
-  await page.getByRole("button", { name: "打开战术炉谱" }).click();
-  const dialog = page.getByRole("dialog", { name: /先看炉火/ });
+  await page.getByRole("button", { name: "打开角色与规则" }).click();
+  const dialog = page.getByRole("dialog", { name: /选择执火者与规则/ });
   await expect(dialog.getByRole("radio", { name: /铸痕/ })).toBeDisabled();
-  await expect(dialog.getByRole("button", { name: "返回战场" })).toBeFocused();
-  await dialog.getByRole("button", { name: "返回战场" }).click();
+  await expect(dialog.getByRole("heading", { name: "选择执火者与规则" })).toBeFocused();
+  await dialog.getByRole("button", { name: "返回争焰对局" }).click();
 
   await expect(hand.getByRole("button")).toHaveCount(3);
+  assertNoPageErrors();
+});
+
+test("争焰连续行动会在刷新后原位续玩", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "断点续玩与视口无关，只在一个桌面项目验证");
+  const assertNoPageErrors = collectPageErrors(page);
+  await installEmberPactSave(page, createTwoActionRoot());
+  await page.goto("/?game=ember-pact");
+
+  const hand = page.getByRole("list", { name: "你的手牌" });
+  await expect(hand.getByRole("button")).toHaveCount(2);
+  await hand.getByRole("button", { name: /护阵/ }).click();
+  await page.getByRole("button", { name: /初焰.*可选为目标/ }).click();
+  await expect(page.locator(".turn-track__actions strong")).toContainText("1/2");
+  await expect(hand.getByRole("button")).toHaveCount(1);
+
+  await expect.poll(() => page.evaluate((key) => {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return undefined;
+    return JSON.parse(raw).snapshot.data.activeMatch.state.actionsRemaining;
+  }, EMBER_PACT_SAVE_KEY)).toBe(1);
+  await page.reload();
+
+  await expect(page.locator(".turn-track__actions strong")).toContainText("1/2");
+  await expect(hand.getByRole("button")).toHaveCount(1);
+  await hand.getByRole("button", { name: /协战/ }).click();
+  await page.getByRole("button", { name: /弦月.*可选为目标/ }).click();
+  await page.getByRole("button", { name: "查看战报" }).click();
+  await expect(page.locator(".turn-track__order li.is-current")).toContainText("铸痕");
+  assertNoPageErrors();
+});
+
+test("争焰允许玩家用卸力响应敌方攻击", async ({ page }) => {
+  const assertNoPageErrors = collectPageErrors(page);
+  await installEmberPactSave(page, createHumanResponseRoot());
+  await page.goto("/?game=ember-pact");
+
+  const response = page.locator(".response-panel");
+  await expect(response).toContainText("敌方回合 · 你的响应");
+  const deflect = response.getByRole("button", { name: /卸力.*化解 4 点/ }).first();
+  await expect(deflect).toBeFocused();
+  await deflect.click();
+  await expect(response).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /铸痕.*生命 18\/19/ })).toBeVisible();
+  assertNoPageErrors();
+});
+
+test("争焰结算与战绩会跨刷新保留并支持原阵容再战", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "结果幂等与视口无关，只在一个桌面项目验证");
+  const assertNoPageErrors = collectPageErrors(page);
+  await installEmberPactSave(page, createFinishedVictoryRoot());
+  await page.goto("/?game=ember-pact");
+
+  const result = page.getByRole("dialog", { name: "联手守住了这一焰" });
+  await expect(result).toContainText("造成伤害19");
+  await expect(result).toContainText("联携3");
+  await page.reload();
+  await expect(result).toBeVisible();
+  await expect.poll(() => page.evaluate((key) => {
+    const raw = window.localStorage.getItem(key);
+    return raw ? JSON.parse(raw).snapshot.data.lifetimeProfile.gamesPlayed : undefined;
+  }, EMBER_PACT_SAVE_KEY)).toBe(1);
+
+  await result.getByRole("button", { name: "原阵容再战" }).click();
+  await expect(result).toHaveCount(0);
+  await page.getByRole("button", { name: "查看争焰记录" }).click();
+  const profile = page.getByRole("dialog", { name: "争焰记录" });
+  await expect(profile).toContainText("完成对局1");
+  await expect(profile).toContainText("初焰");
+  await expect(profile).toContainText("1 胜 / 1 局");
+  assertNoPageErrors();
+});
+
+test("争焰不会自动覆盖未知存档，明确重置后才写入 v2", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "存档版本行为与视口无关，只在一个桌面项目验证");
+  const assertNoPageErrors = collectPageErrors(page);
+  await installFutureEmberPactSave(page);
+  await page.goto("/?game=ember-pact");
+
+  const warning = page.getByRole("alert");
+  await expect(warning).toContainText("现有存档无法安全读取，本次不会覆盖它");
+  const setup = page.getByRole("dialog", { name: /选择执火者与规则/ });
+  await expect(setup.getByRole("heading", { name: "选择执火者与规则" })).toBeFocused();
+
+  // Force a root revision while saving is blocked. The future envelope must
+  // remain byte-for-byte meaningful until the player explicitly resets it.
+  await setup.getByRole("radio", { name: /战术/ }).click();
+  const untouched = await page.evaluate((key) => {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw);
+    return { schemaVersion: parsed.schemaVersion, data: parsed.snapshot.data };
+  }, EMBER_PACT_SAVE_KEY);
+  expect(untouched).toEqual({
+    schemaVersion: FUTURE_EMBER_PACT_SCHEMA_VERSION,
+    data: FUTURE_EMBER_PACT_DATA,
+  });
+
+  await warning.getByRole("button", { name: "重置旧存档并启用保存" }).click();
+  await expect(warning).toHaveCount(0);
+  await expect.poll(() => page.evaluate((key) => {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw);
+    return {
+      schemaVersion: parsed.schemaVersion,
+      revision: parsed.snapshot.revision,
+      difficulty: parsed.snapshot.data.preferences.difficulty,
+    };
+  }, EMBER_PACT_SAVE_KEY)).toEqual({ schemaVersion: 2, revision: 1, difficulty: "tactician" });
+
+  await page.reload();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.getByRole("radio", { name: /战术/ })).toHaveAttribute("aria-checked", "true");
+  assertNoPageErrors();
+});
+
+test("争焰手机端结算与战绩面板保持在视口内并正确管理焦点", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "mobile", "仅验证手机竖屏布局");
+  const assertNoPageErrors = collectPageErrors(page);
+  await installEmberPactSave(page, createFinishedVictoryRoot());
+  await page.goto("/?game=ember-pact");
+
+  const result = page.getByRole("dialog", { name: "联手守住了这一焰" });
+  const replay = result.getByRole("button", { name: "原阵容再战" });
+  await expect(replay).toBeFocused();
+  await expectElementWithinViewport(page, result.locator(".result-card"));
+  await expectNoDocumentOverflow(page);
+
+  await replay.click();
+  await page.getByRole("button", { name: "查看争焰记录" }).click();
+  const profile = page.getByRole("dialog", { name: "争焰记录" });
+  await expect(profile.getByRole("button", { name: "关闭争焰记录" })).toBeFocused();
+  await expectElementWithinViewport(page, profile.locator(".profile-sheet"));
+  await profile.locator(".profile-roster article").last().scrollIntoViewIfNeeded();
+  await expect(profile.locator(".profile-roster article").last()).toBeVisible();
+  await expectNoDocumentOverflow(page);
   assertNoPageErrors();
 });
 
@@ -207,11 +368,11 @@ test("游戏模块加载期间显示带忙碌状态的宿主页", async ({ page 
   });
 
   const navigation = page.goto("/?game=ember-pact");
-  const loading = page.getByRole("status");
+  const loading = page.locator('.game-loading[role="status"][aria-busy="true"]');
   await expect(loading).toContainText("正在展开牌桌");
   await expect(loading).toHaveAttribute("aria-busy", "true");
   await navigation;
-  await expect(page.getByRole("dialog", { name: /先看炉火/ })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: /选择执火者与规则/ })).toBeVisible();
   assertNoPageErrors();
 });
 
@@ -235,7 +396,7 @@ test("游戏模块加载失败后可以重试恢复", async ({ page }, testInfo)
 });
 
 for (const game of [
-  { id: "ember-pact", landmark: "烬契战场" },
+  { id: "ember-pact", landmark: "争焰战场" },
   { id: "twenty-one", landmark: "二十一刻牌桌" },
   { id: "guandan", landmark: "四人掼蛋牌桌" },
 ] as const) {

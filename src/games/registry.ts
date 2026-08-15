@@ -33,17 +33,17 @@ const plannedGames: readonly GameRegistration[] = [
 export const gameRegistry = new GameRegistry().register({
   manifest: {
     id: "ember-pact",
-    name: "烬契",
-    shortName: "烬契",
-    description: "四人选将，在状态、被动与行动顺序之间找到配合。",
-    genre: "2v2 阵营对战",
+    name: "争焰",
+    shortName: "争焰",
+    description: "选择一名执火者，与 AI 队友在四席战场中设局、支援并击溃对手。",
+    genre: "四人阵营策略",
     players: "1 人 + 3 AI",
     sessionLength: "约 8–10 分钟",
     availability: "playable",
     accent: "#cf6049",
     featured: true,
-    mark: "烬",
-    tagline: "架构验证局",
+    mark: "焰",
+    tagline: "四席交锋，联手争焰",
   },
   load: () => import("./ember-pact"),
 }).register({

@@ -9,6 +9,7 @@
     "typecheck": "tsc -b",
     "lint": "eslint .",
     "test": "vitest run src",
+    "test:balance:ember": "vite-node scripts/ember-pact-balance.ts 1000",
     "test:e2e": "playwright test",
     "test:e2e:report": "playwright show-report"
   },

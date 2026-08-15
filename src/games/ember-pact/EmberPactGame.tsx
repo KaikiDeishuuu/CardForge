@@ -1,24 +1,43 @@
 import { useEffect, useMemo, useState } from "react";
 import type { GameRuntimeProps } from "../../core/games/types";
 import { useSound } from "../../shared/audio/SoundProvider";
-import { useModalFocus } from "../../shared/ui/useModalFocus";
 import { PlayerHand } from "./components/PlayerHand";
 import { PlayerSeat } from "./components/PlayerSeat";
 import { CombatantSheet, TacticalBrief } from "./components/TacticalBrief";
-import { chooseAiMove } from "./domain/ai";
-import { TEAM_NAMES } from "./domain/data";
+import { TurnTrack } from "./components/TurnTrack";
+import {
+  ProfilePanel,
+  ResponsePanel,
+  ResultPanel,
+  type ProfileOverview,
+} from "./components/BattlePanels";
+import { chooseAiMove, chooseAiResponse } from "./domain/ai";
+import { COMBATANT_SEEDS, PASSIVE_CATALOG, TEAM_NAMES } from "./domain/data";
 import {
   DEFAULT_HUMAN_ID,
-  OVERHEAT_START_ROUND,
   createInitialState,
+  declineResponse,
+  endTurn,
   getCard,
   getCombatant,
+  getResponseCards,
   getValidTargetIds,
-  passTurn,
   playCard,
+  respondToAttack,
 } from "./domain/engine";
-import { PACT_SAVE_SCHEMA_VERSION, restorePactState, serializePactState } from "./domain/persistence";
-import type { CardKind } from "./domain/types";
+import {
+  PACT_SAVE_SCHEMA_VERSION,
+  restorePactRootState,
+  serializePactRootState,
+} from "./domain/persistence";
+import {
+  createDefaultRootState,
+  dismissFinishedMatch,
+  startMatch,
+  updateActiveMatch,
+  updatePreferences,
+} from "./domain/session";
+import type { CardKind, Difficulty, EmberPactState } from "./domain/types";
 import "./ember-pact.css";
 
 const cueForKind: Record<CardKind, "hit" | "card" | "heal"> = {
@@ -29,79 +48,150 @@ const cueForKind: Record<CardKind, "hit" | "card" | "heal"> = {
 };
 
 export function EmberPactGame({ onExit, persistence }: GameRuntimeProps) {
-  const restored = useMemo(
-    () => persistence?.restored && persistence.restored.schemaVersion === PACT_SAVE_SCHEMA_VERSION
-      ? restorePactState(persistence.restored.data)
+  const restoredRoot = useMemo(
+    () => persistence?.restored
+      ? restorePactRootState(persistence.restored.schemaVersion, persistence.restored.data)
       : undefined,
     [persistence],
   );
-  const [chosenId, setChosenId] = useState(() =>
-    restored?.combatants.find((combatant) => combatant.controller === "human")?.id ?? DEFAULT_HUMAN_ID);
-  const [state, setState] = useState(() => restored ?? createInitialState(Math.random, DEFAULT_HUMAN_ID));
+  const initialRoot = useMemo(() => restoredRoot ?? createDefaultRootState(), [restoredRoot]);
+  const unreadableRestoredSave = Boolean(persistence?.restored && !restoredRoot);
+  const restoredMatch = initialRoot.activeMatch?.state;
+  const initialHumanId = restoredMatch?.combatants.find((combatant) => combatant.controller === "human")?.id
+    ?? DEFAULT_HUMAN_ID;
+
+  const [root, setRoot] = useState(initialRoot);
+  const [chosenId, setChosenId] = useState(initialHumanId);
+  const [draft, setDraft] = useState(() => restoredMatch
+    ?? createInitialState(Math.random, initialHumanId, initialRoot.preferences.difficulty));
   const [selectedUid, setSelectedUid] = useState<string>();
   const [showLog, setShowLog] = useState(false);
-  const [showBrief, setShowBrief] = useState(restored === undefined);
-  const [setupComplete, setSetupComplete] = useState(restored !== undefined);
+  const [showBrief, setShowBrief] = useState(!restoredMatch);
+  const [showProfile, setShowProfile] = useState(false);
   const [inspectedId, setInspectedId] = useState<string>();
+  const [notice, setNotice] = useState<string>();
+  const [saveBlocked, setSaveBlocked] = useState(unreadableRestoredSave);
+  const [saveUnavailable, setSaveUnavailable] = useState(false);
+  const [restoredNotice, setRestoredNotice] = useState(Boolean(restoredMatch?.status === "playing"));
   const { enabled: soundEnabled, toggle: toggleSound, play: playSound } = useSound();
 
+  const state = root.activeMatch?.state ?? draft;
+  const setupComplete = Boolean(root.activeMatch);
   const active = getCombatant(state, state.activePlayerId);
-  // 出战角色由开局选将决定，敌我分组随之翻转，不再假设人类固定是 dawn。
   const player = state.combatants.find((combatant) => combatant.controller === "human")!;
-  // 未在炉谱提交选将前冻结战场：重选只可能发生在对局开始之前，中途改选
-  // 也就永远不会通过重发牌抹掉已有进度。
-  const isHumanTurn = state.status === "playing" && active?.controller === "human" && setupComplete;
-  // Derived, not stored: a combatant is thinking exactly while its move is pending.
-  const aiThinking = state.status === "playing" && active?.controller === "ai" && !showBrief && !inspectedId;
+  const responder = state.pendingAttack ? getCombatant(state, state.pendingAttack.targetId) : undefined;
+  const attacker = state.pendingAttack ? getCombatant(state, state.pendingAttack.actorId) : undefined;
+  const isHumanTurn = setupComplete
+    && state.status === "playing"
+    && state.phase === "action"
+    && active?.controller === "human";
+  const isHumanResponse = setupComplete
+    && state.status === "playing"
+    && state.phase === "response"
+    && responder?.controller === "human";
+  const overlayOpen = showBrief || showLog || showProfile || Boolean(inspectedId);
+  const modalOpen = showBrief || showProfile || Boolean(inspectedId) || state.status === "finished";
+  const aiThinking = setupComplete
+    && state.status === "playing"
+    && !overlayOpen
+    && (state.phase === "response" ? responder?.controller === "ai" : active?.controller === "ai");
+
   const validTargetIds = useMemo(
     () => selectedUid ? getValidTargetIds(state, player.id, selectedUid) : [],
     [player.id, selectedUid, state],
   );
+  const playableUids = useMemo(
+    () => isHumanTurn
+      ? player.hand.filter((instance) => getValidTargetIds(state, player.id, instance.uid).length > 0).map((instance) => instance.uid)
+      : [],
+    [isHumanTurn, player.hand, player.id, state],
+  );
 
   useEffect(() => {
-    if (!aiThinking || !active) return;
-
+    if (!aiThinking) return;
     const expectedRevision = state.revision;
-    const expectedActor = active.id;
-    const move = chooseAiMove(state, expectedActor);
-    const timer = window.setTimeout(() => {
-      if (move) {
-        const instance = active.hand.find((card) => card.uid === move.cardUid);
-        if (instance) playSound(cueForKind[getCard(instance).kind]);
-      }
+    const expectedPhase = state.phase;
 
-      setState((current) => {
-        if (current.revision !== expectedRevision || current.activePlayerId !== expectedActor) return current;
-        return move
-          ? playCard(current, expectedActor, move.cardUid, move.targetId)
-          : passTurn(current, expectedActor);
-      });
-    }, 720);
+    if (state.phase === "response" && responder) {
+      const effectiveDifficulty = responder.team === player.team ? "standard" : state.difficulty;
+      const responseUid = chooseAiResponse(state, responder.id, effectiveDifficulty);
+      const timer = window.setTimeout(() => {
+        playSound(responseUid ? "card" : "hit");
+        setRoot((current) => {
+          const match = current.activeMatch?.state;
+          if (!match || match.revision !== expectedRevision || match.phase !== expectedPhase) return current;
+          const next = responseUid
+            ? respondToAttack(match, responder.id, responseUid)
+            : declineResponse(match, responder.id);
+          return updateActiveMatch(current, next);
+        });
+      }, 620);
+      return () => window.clearTimeout(timer);
+    }
 
-    return () => window.clearTimeout(timer);
-  }, [active, aiThinking, playSound, state]);
+    if (state.phase === "action" && active) {
+      const effectiveDifficulty: Difficulty = active.team === player.team ? "standard" : state.difficulty;
+      const move = chooseAiMove(state, active.id, effectiveDifficulty);
+      const timer = window.setTimeout(() => {
+        if (move) {
+          const instance = active.hand.find((card) => card.uid === move.cardUid);
+          if (instance) playSound(cueForKind[getCard(instance).kind]);
+        }
+        setRoot((current) => {
+          const match = current.activeMatch?.state;
+          if (!match || match.revision !== expectedRevision || match.phase !== expectedPhase
+            || match.activePlayerId !== active.id) return current;
+          const next = move
+            ? playCard(match, active.id, move.cardUid, move.targetId)
+            : endTurn(match, active.id);
+          return updateActiveMatch(current, next);
+        });
+      }, 620);
+      return () => window.clearTimeout(timer);
+    }
+  }, [active, aiThinking, playSound, player.team, responder, state]);
 
   useEffect(() => {
-    if (state.status === "finished") playSound(state.winner === player.team ? "win" : "tap");
+    if (state.status !== "finished" || !state.winner) return;
+    playSound(state.winner === player.team ? "win" : "tap");
   }, [playSound, player.team, state.status, state.winner]);
 
   useEffect(() => {
-    if (!persistence) return;
-    // 单场对局：落定即清除存档，下次进入从新开局开始。
-    if (state.status === "finished") {
-      persistence.clear();
-      return;
-    }
-    // 没有任何进展（revision 0）且此前没有存档时不落盘：避免把
-    // 「进过牌桌但什么都没做」也当作可续玩的对局。重开产生的新局
-    // 在有旧档时会在这里直接覆盖它。
-    if (state.revision === 0 && !persistence.restored) return;
-    persistence.save(PACT_SAVE_SCHEMA_VERSION, state.revision, serializePactState(state));
-  }, [persistence, state]);
+    if (!persistence || saveBlocked || (root.revision === 0 && !persistence.restored)) return;
+    const saved = persistence.save(PACT_SAVE_SCHEMA_VERSION, root.revision, serializePactRootState(root));
+    if (saved) return;
+    const timer = window.setTimeout(() => setSaveUnavailable(true), 0);
+    return () => window.clearTimeout(timer);
+  }, [persistence, root, saveBlocked]);
+
+  useEffect(() => {
+    if (!restoredNotice) return;
+    const timer = window.setTimeout(() => setRestoredNotice(false), 3_000);
+    return () => window.clearTimeout(timer);
+  }, [restoredNotice]);
+
+  function transitionMatch(update: (current: EmberPactState) => EmberPactState) {
+    setRoot((current) => {
+      const match = current.activeMatch?.state;
+      if (!match) return current;
+      return updateActiveMatch(current, update(match));
+    });
+  }
 
   function handleSelect(uid: string) {
     if (!isHumanTurn) return;
+    if (!playableUids.includes(uid)) {
+      const card = player.hand.find((instance) => instance.uid === uid);
+      const definition = card ? getCard(card) : undefined;
+      setNotice(definition?.kind === "attack" && state.attackUsed
+        ? "本回合已经使用过进攻牌，可以改用战术、守护或回复牌。"
+        : "当前行动力不足，结束回合后会补充到 2 点。"
+      );
+      playSound("tap");
+      return;
+    }
     setSelectedUid((current) => current === uid ? undefined : uid);
+    setNotice(undefined);
     playSound("tap");
   }
 
@@ -109,86 +199,170 @@ export function EmberPactGame({ onExit, persistence }: GameRuntimeProps) {
     if (!selectedUid || !validTargetIds.includes(targetId)) return;
     const instance = player.hand.find((card) => card.uid === selectedUid);
     if (instance) playSound(cueForKind[getCard(instance).kind]);
-    setState((current) => playCard(current, player.id, selectedUid, targetId));
+    transitionMatch((current) => playCard(current, player.id, selectedUid, targetId));
     setSelectedUid(undefined);
+    setNotice(undefined);
   }
 
-  function handlePass() {
-    setSelectedUid(undefined);
-    setState((current) => passTurn(current, player.id));
+  function handleInvalidTarget() {
+    setNotice("这名角色不符合当前卡牌的目标条件；金色高亮座位才可选择。");
     playSound("tap");
   }
 
-  /** 选将只在开局炉谱里可用，直接按新角色重新发牌。 */
+  function handleEndTurn() {
+    setSelectedUid(undefined);
+    setNotice(undefined);
+    transitionMatch((current) => endTurn(current, player.id));
+    playSound("tap");
+  }
+
+  function handleResponse(cardUid?: string) {
+    if (!isHumanResponse || !responder) return;
+    transitionMatch((current) => cardUid
+      ? respondToAttack(current, responder.id, cardUid)
+      : declineResponse(current, responder.id));
+    playSound(cardUid ? "card" : "hit");
+    setNotice(undefined);
+  }
+
   function chooseCombatant(id: string) {
-    if (setupComplete || !showBrief || id === chosenId) return;
+    if (setupComplete || id === chosenId) return;
     setChosenId(id);
     setSelectedUid(undefined);
-    setState(createInitialState(Math.random, id));
+    setDraft(createInitialState(Math.random, id, root.preferences.difficulty));
     playSound("tap");
   }
 
-  /** 只有显式提交才锁定选将；「×」与 Escape 只是收起炉谱，仍可重开重选。 */
+  function chooseDifficulty(difficulty: Difficulty) {
+    if (setupComplete) return;
+    setRoot((current) => updatePreferences(current, { difficulty }));
+    setDraft(createInitialState(Math.random, chosenId, difficulty));
+    playSound("tap");
+  }
+
+  function chooseGuide(guideEnabled: boolean) {
+    if (setupComplete) return;
+    setRoot((current) => updatePreferences(current, { guideEnabled }));
+  }
+
   function commitBrief() {
-    setSetupComplete(true);
+    if (setupComplete) {
+      setShowBrief(false);
+      return;
+    }
+    setRoot((current) => startMatch(current, draft));
     setShowBrief(false);
+    playSound("card");
   }
 
   function dismissBrief() {
+    if (!setupComplete) {
+      onExit();
+      return;
+    }
     setShowBrief(false);
+  }
+
+  function resetUnreadableSave() {
+    persistence?.clear();
+    setSaveBlocked(false);
+    setSaveUnavailable(false);
   }
 
   function restart() {
     setSelectedUid(undefined);
     setShowLog(false);
     setInspectedId(undefined);
-    setState(createInitialState(Math.random, chosenId));
+    setRoot((current) => {
+      const cleared = dismissFinishedMatch(current);
+      return startMatch(cleared, createInitialState(Math.random, chosenId, current.preferences.difficulty));
+    });
     playSound("card");
+  }
+
+  function changeRole() {
+    setRoot((current) => dismissFinishedMatch(current));
+    setDraft(createInitialState(Math.random, chosenId, root.preferences.difficulty));
+    setSelectedUid(undefined);
+    setShowBrief(true);
   }
 
   const enemies = state.combatants.filter((combatant) => combatant.team !== player.team);
   const allies = state.combatants.filter((combatant) => combatant.team === player.team);
   const enemyTeam = enemies[0]?.team ?? (player.team === "dawn" ? "dusk" : "dawn");
-  const selectedCard = selectedUid
-    ? player.hand.find((card) => card.uid === selectedUid)
-    : undefined;
+  const selectedCard = selectedUid ? player.hand.find((card) => card.uid === selectedUid) : undefined;
   const inspected = inspectedId ? getCombatant(state, inspectedId) : undefined;
-  const overheatAmount = state.roundNumber >= OVERHEAT_START_ROUND
-    ? state.roundNumber - OVERHEAT_START_ROUND + 1
-    : 0;
-  const resultModalRef = useModalFocus({
-    active: state.status === "finished" && Boolean(state.winner),
-    initialFocus: ".primary-button",
-  });
+  const responseCards = responder ? getResponseCards(state, responder.id) : [];
+  const pendingCard = state.pendingAttack ? getCard({
+    uid: state.pendingAttack.cardUid,
+    definitionId: state.pendingAttack.definitionId,
+  }) : undefined;
+  const actionPrompt = !setupComplete
+    ? "选择执火者后开始"
+    : isHumanResponse
+      ? "选择卸力，或承受攻击"
+      : isHumanTurn
+        ? selectedCard
+          ? `选择「${getCard(selectedCard).name}」的目标`
+          : `还有 ${state.actionsRemaining} 点行动力 · 选牌或结束回合`
+        : aiThinking
+          ? `${state.phase === "response" ? responder?.displayName : active?.displayName}正在判断…`
+          : `等待${active?.displayName ?? "其他角色"}行动`;
+  const guideMessage = root.preferences.guideEnabled && setupComplete && state.status === "playing"
+    ? isHumanResponse
+      ? "响应不消耗下一回合行动力；若伤害不致命，也可以保留卸力。"
+      : isHumanTurn && selectedCard
+        ? "只需点击金色高亮座位；再次点选手牌可以取消。"
+        : isHumanTurn && state.actionsRemaining < 2
+          ? "你还可以继续使用非进攻牌，也可以提前结束回合。"
+          : isHumanTurn
+            ? "每回合有 2 点行动力，但进攻牌最多使用 1 张。"
+            : "观察行动轨：四席按守炉、逐光交错行动，队友施加的状态可以触发联携。"
+    : undefined;
+  const trackSummary = notice
+    ?? (isHumanTurn && selectedCard ? guideMessage : undefined)
+    ?? state.lastAction?.summary
+    ?? guideMessage;
+  const saveWarning = saveBlocked
+    ? "现有存档无法安全读取，本次不会覆盖它。"
+    : saveUnavailable
+      ? "本机存档不可用，本次进度只在当前页面保留。"
+      : undefined;
+
+  const profileOverview: ProfileOverview = useMemo(() => ({
+    completed: root.lifetimeProfile.gamesPlayed,
+    wins: root.lifetimeProfile.wins,
+    losses: root.lifetimeProfile.losses,
+    draws: root.lifetimeProfile.draws,
+    currentStreak: root.lifetimeProfile.currentWinStreak,
+    bestStreak: root.lifetimeProfile.bestWinStreak,
+    fastestWinRound: root.lifetimeProfile.fastestWinRounds,
+    lifetimeMetrics: root.lifetimeProfile.playerMetrics,
+    characters: COMBATANT_SEEDS.map((combatant) => ({
+      id: combatant.id,
+      name: combatant.displayName,
+      role: PASSIVE_CATALOG[combatant.passiveId].role,
+      played: root.lifetimeProfile.combatants[combatant.id as keyof typeof root.lifetimeProfile.combatants].gamesPlayed,
+      wins: root.lifetimeProfile.combatants[combatant.id as keyof typeof root.lifetimeProfile.combatants].wins,
+      bestDifficulty: root.lifetimeProfile.combatants[combatant.id as keyof typeof root.lifetimeProfile.combatants].highestDifficulty,
+    })),
+  }), [root]);
 
   return (
     <main className="battle-screen">
       <header className="battle-topbar">
-        <button type="button" className="icon-button" onClick={onExit} aria-label="返回游戏大厅">
-          <span aria-hidden="true">←</span>
-        </button>
-        <div className="battle-title">
-          <small>战术试炼</small>
-          <strong>烬契 · 2v2</strong>
-        </div>
+        <button type="button" className="icon-button" onClick={onExit} aria-label="返回游戏大厅"><span aria-hidden="true">←</span></button>
+        <div className="battle-title"><small>四席阵营策略</small><strong>争焰</strong></div>
         <div className="battle-actions">
-          <button type="button" className="icon-button" onClick={() => setShowBrief(true)} aria-label="打开战术炉谱">
-            <span aria-hidden="true">?</span>
-          </button>
-          <button type="button" className="icon-button" onClick={() => setShowLog((value) => !value)} aria-label="查看战报">
-            <span aria-hidden="true">≡</span>
-          </button>
-          <button type="button" className="icon-button" onClick={toggleSound} aria-label={soundEnabled ? "关闭声音" : "开启声音"}>
-            <span aria-hidden="true">{soundEnabled ? "♪" : "×"}</span>
-          </button>
+          <button type="button" className="icon-button" onClick={() => setShowProfile(true)} aria-label="查看争焰记录"><span aria-hidden="true">◎</span></button>
+          <button type="button" className="icon-button" onClick={() => setShowBrief(true)} aria-label="打开角色与规则"><span aria-hidden="true">?</span></button>
+          <button type="button" className="icon-button" onClick={() => setShowLog((value) => !value)} aria-label="查看战报" aria-expanded={showLog} aria-controls="battle-log"><span aria-hidden="true">≡</span></button>
+          <button type="button" className="icon-button" onClick={toggleSound} aria-label={soundEnabled ? "关闭声音" : "开启声音"}><span aria-hidden="true">{soundEnabled ? "♪" : "×"}</span></button>
         </div>
       </header>
 
-      <section className="battlefield" aria-label="烬契战场">
-        <div className="team-label team-label--enemy">
-          <span>{TEAM_NAMES[enemyTeam]}</span>
-          <i />
-        </div>
+      <section className="battlefield" aria-label="争焰战场">
+        <div className="team-label team-label--enemy"><span>{TEAM_NAMES[enemyTeam]}</span><i /></div>
         <div className="seat-row seat-row--enemies">
           {enemies.map((combatant) => (
             <PlayerSeat
@@ -196,36 +370,24 @@ export function EmberPactGame({ onExit, persistence }: GameRuntimeProps) {
               combatant={combatant}
               active={state.activePlayerId === combatant.id}
               targetable={validTargetIds.includes(combatant.id)}
+              selectionActive={Boolean(selectedUid)}
               lastAction={state.lastAction}
               revision={state.revision}
               onTarget={handleTarget}
               onInspect={setInspectedId}
+              onInvalidTarget={handleInvalidTarget}
             />
           ))}
         </div>
 
-        <div className={`forge-line ${overheatAmount > 0 ? "is-overheating" : ""}`} aria-live="polite">
-          <span className="forge-mark" aria-hidden="true">
-            <i /><i /><i />
-            {overheatAmount > 0 && <b>{overheatAmount}</b>}
-          </span>
-          <p>
-            {state.status === "finished"
-              ? "对局结束"
-              : !setupComplete
-                ? "先在战术炉谱里选择出战角色"
-                : aiThinking
-                  ? `${active?.displayName}正在思考…`
-                  : isHumanTurn
-                    ? selectedCard
-                      ? `选择「${getCard(selectedCard).name}」的目标`
-                      : "你的行动 · 选择一张手牌"
-                    : `${active?.displayName}的行动`}
-          </p>
-          <span className="round-counter">
-            {overheatAmount > 0 ? `过载 ${overheatAmount}` : `轮次 ${state.roundNumber}`}
-          </span>
-        </div>
+        <TurnTrack
+          combatants={state.combatants}
+          activePlayerId={state.activePlayerId}
+          actionsRemaining={state.actionsRemaining}
+          roundNumber={state.roundNumber}
+          phase={state.phase}
+          summary={trackSummary}
+        />
 
         <div className="seat-row seat-row--allies">
           {allies.map((combatant) => (
@@ -234,41 +396,55 @@ export function EmberPactGame({ onExit, persistence }: GameRuntimeProps) {
               combatant={combatant}
               active={state.activePlayerId === combatant.id}
               targetable={validTargetIds.includes(combatant.id)}
+              selectionActive={Boolean(selectedUid)}
               lastAction={state.lastAction}
               revision={state.revision}
               onTarget={handleTarget}
               onInspect={setInspectedId}
+              onInvalidTarget={handleInvalidTarget}
             />
           ))}
         </div>
-        <div className="team-label team-label--ally">
-          <i />
-          <span>{TEAM_NAMES[player.team]}</span>
-        </div>
+        <div className="team-label team-label--ally"><i /><span>{TEAM_NAMES[player.team]}</span></div>
       </section>
 
-      <section className="hand-dock" aria-label="行动区">
-        <div className="hand-dock__header">
-          <span>
-            <small>你的手牌</small>
-            <strong>{!setupComplete ? "先在战术炉谱里选择出战角色" : isHumanTurn ? "选牌，再点选目标" : "等待其他角色行动"}</strong>
-          </span>
-          <button type="button" className="pass-button" onClick={handlePass} disabled={!isHumanTurn}>
-            暂缓行动
-          </button>
+      {isHumanResponse && responder && attacker && pendingCard ? (
+        <ResponsePanel
+          attacker={attacker}
+          responder={responder}
+          attackName={pendingCard.name}
+          cards={responseCards}
+          onRespond={(cardUid) => handleResponse(cardUid)}
+          onDecline={() => handleResponse()}
+        />
+      ) : (
+        <section className="hand-dock" aria-label="行动区">
+          <div className="hand-dock__header">
+            <span><small>{isHumanTurn ? `你的手牌 · ${state.actionsRemaining} 行动力` : "你的手牌"}</small><strong>{actionPrompt}</strong></span>
+            <button type="button" className="pass-button" onClick={handleEndTurn} disabled={!isHumanTurn}>结束回合</button>
+          </div>
+          <PlayerHand
+            cards={player.hand}
+            selectedUid={selectedUid}
+            enabled={isHumanTurn}
+            playableUids={playableUids}
+            onSelect={handleSelect}
+          />
+        </section>
+      )}
+
+      {restoredNotice && <div className="pact-restore-notice" role="status">已恢复第 {state.roundNumber} 轮争焰</div>}
+      {saveWarning && !modalOpen && (
+        <div className="pact-save-warning" role="alert">
+          <span>{saveWarning}</span>
+          {saveBlocked && <button type="button" onClick={resetUnreadableSave}>重置旧存档并启用保存</button>}
         </div>
-        <PlayerHand cards={player.hand} selectedUid={selectedUid} enabled={isHumanTurn} onSelect={handleSelect} />
-      </section>
+      )}
 
       {showLog && (
-        <aside className="battle-log" aria-label="战报">
-          <div>
-            <strong>炉边战报</strong>
-            <button type="button" onClick={() => setShowLog(false)} aria-label="关闭战报">×</button>
-          </div>
-          <ol>
-            {[...state.log].reverse().map((entry) => <li key={entry.id}>{entry.text}</li>)}
-          </ol>
+        <aside id="battle-log" className="battle-log" aria-label="战报">
+          <div><strong>战报</strong><button type="button" onClick={() => setShowLog(false)} aria-label="关闭战报">×</button></div>
+          <ol>{[...state.log].reverse().map((entry) => <li key={entry.id}>{entry.text}</li>)}</ol>
         </aside>
       )}
 
@@ -277,29 +453,32 @@ export function EmberPactGame({ onExit, persistence }: GameRuntimeProps) {
           combatants={state.combatants}
           selectedId={chosenId}
           selectionLocked={setupComplete}
+          difficulty={root.preferences.difficulty}
+          guideEnabled={root.preferences.guideEnabled}
+          saveWarning={saveWarning}
+          onResetSave={saveBlocked ? resetUnreadableSave : undefined}
           onSelect={chooseCombatant}
+          onDifficultyChange={chooseDifficulty}
+          onGuideChange={chooseGuide}
           onCommit={commitBrief}
           onClose={dismissBrief}
         />
       )}
-
-      {inspected && (
-        <CombatantSheet combatant={inspected} onClose={() => setInspectedId(undefined)} />
-      )}
+      {showProfile && <ProfilePanel profile={profileOverview} onClose={() => setShowProfile(false)} />}
+      {inspected && <CombatantSheet combatant={inspected} onClose={() => setInspectedId(undefined)} />}
 
       {state.status === "finished" && state.winner && (
-        <div ref={resultModalRef} className="result-overlay" role="dialog" aria-modal="true" aria-labelledby="result-title" tabIndex={-1}>
-          <div className={`result-card result-card--${state.winner}`}>
-            <span className="result-card__seal" aria-hidden="true">{state.winner === "dawn" ? "铸" : "蚀"}</span>
-            <small>试炼完成</small>
-            <h2 id="result-title">{TEAM_NAMES[state.winner]}胜出</h2>
-            <p>{state.winner === "dawn" ? "火种仍在，工坊将记住这次配合。" : "夜蚀占据了桌面。再调整一次出牌顺序。"}</p>
-            <div>
-              <button type="button" className="primary-button" onClick={restart}>再来一局</button>
-              <button type="button" className="text-button" onClick={onExit}>返回大厅</button>
-            </div>
-          </div>
-        </div>
+        <ResultPanel
+          winner={state.winner}
+          playerTeam={player.team}
+          difficulty={state.difficulty}
+          roundNumber={state.roundNumber}
+          metrics={state.metrics[player.id]}
+          archiveAvailable={!saveBlocked && !saveUnavailable}
+          onReplay={restart}
+          onChangeRole={changeRole}
+          onExit={onExit}
+        />
       )}
     </main>
   );
