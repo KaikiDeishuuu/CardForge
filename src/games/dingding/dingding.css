@@ -130,6 +130,7 @@
 .ding-seat__copy small { color: #b89358; font-family: var(--utility); font-size: 7px; font-weight: 900; letter-spacing: 0.1em; }
 .ding-seat__copy strong { font-size: 13px; }
 .ding-seat__copy em { color: #8fa3a0; font-size: 9px; font-style: normal; }
+.ding-seat__delayed { color: #e0b16b; font-size: 8px; font-weight: 800; }
 .ding-seat__hero { color: #e8c987; font-family: var(--display); font-size: 10px; font-style: normal; }
 .ding-hp { width: 100%; height: 5px; display: block; background: rgba(255, 255, 255, 0.1); border-radius: 999px; overflow: hidden; }
 .ding-hp b { display: block; height: 100%; background: linear-gradient(90deg, #a83d36, #d08a4a); }
@@ -185,6 +186,10 @@
 .ding-piles small { color: #8fa3a0; font-size: 8px; }
 .ding-piles b { font-size: 13px; }
 .ding-center p { margin: 0; color: #a9bcb7; font-size: 10px; line-height: 1.5; }
+.ding-stack { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; }
+.ding-stack span { padding: 3px 8px; display: inline-flex; align-items: center; gap: 5px; color: #d8c59b; background: rgba(200, 161, 90, 0.08); border: 1px solid rgba(200, 161, 90, 0.22); border-radius: 999px; font-size: 8px; font-weight: 800; }
+.ding-stack span.is-top { color: #1f2c2e; background: #f2d28a; border-color: #f2d28a; }
+.ding-stack i { color: inherit; font-style: normal; opacity: 0.7; }
 
 .ding-response {
   z-index: 10;
@@ -209,6 +214,47 @@
   border-radius: 999px;
   font-weight: 800;
   cursor: pointer;
+}
+.ding-response__actions button:disabled { opacity: 0.4; cursor: default; }
+
+.ding-skill-panel {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.ding-skill-cost,
+.ding-skill-targets {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.ding-skill-cost > small,
+.ding-skill-targets > small { color: #8fa3a0; font-size: 9px; }
+.ding-skill-cost > div,
+.ding-skill-targets > div { display: flex; flex-wrap: wrap; gap: 7px; }
+.ding-skill-cost .ding-card {
+  flex: 0 0 82px;
+  min-height: 64px;
+  gap: 2px;
+}
+.ding-skill-cost .ding-card strong { font-size: 11px; }
+.ding-skill-targets button {
+  min-height: 38px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #f5e7c8;
+  background: rgba(200, 161, 90, 0.1);
+  border: 1px solid rgba(200, 161, 90, 0.35);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.ding-skill-targets button.is-selected {
+  color: #1f2c2e;
+  background: #f2d28a;
+  border-color: #f2d28a;
 }
 
 .ding-hand-dock {
@@ -265,6 +311,11 @@
   cursor: pointer;
 }
 .ding-action--primary { background: var(--dd-red); border-color: var(--dd-red); }
+.ding-action--skill {
+  color: #1f2c2e;
+  background: #f2d28a;
+  border-color: #f2d28a;
+}
 .ding-action:disabled { opacity: 0.4; cursor: default; }
 
 .ding-log {
@@ -286,6 +337,21 @@
 .ding-log header button { border: 0; background: transparent; font-size: 18px; cursor: pointer; }
 .ding-log ol { margin: 8px 0 0; padding: 0; list-style: none; }
 .ding-log li { padding: 6px 0; border-bottom: 1px solid rgba(36, 52, 56, 0.12); font-size: 10px; line-height: 1.5; }
+
+.ding-profile { width: min(100%, 520px); max-height: calc(100dvh - 40px); overflow-y: auto; }
+.ding-profile > article { position: relative; padding: clamp(26px, 6vw, 44px); color: var(--dd-ink); background: var(--dd-paper); border: 6px solid #b89358; border-radius: 3px; box-shadow: 14px 17px 0 rgba(168, 61, 54, 0.22), 0 28px 70px rgba(0, 0, 0, 0.4); }
+.ding-profile__close { position: absolute; top: 14px; right: 14px; width: 32px; height: 32px; color: #5a5e52; background: transparent; border: 1px solid rgba(36, 63, 62, 0.25); border-radius: 50%; cursor: pointer; }
+.ding-profile > article > small { color: #a13f35; font-family: var(--utility); font-size: 7px; font-weight: 900; letter-spacing: 0.14em; }
+.ding-profile h2 { margin: 16px 0 18px; font-family: var(--display); font-size: clamp(28px, 6vw, 40px); }
+.ding-profile__summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.ding-profile__summary span { padding: 12px; display: flex; flex-direction: column; gap: 4px; background: rgba(184, 147, 88, 0.08); border: 1px solid rgba(184, 147, 88, 0.28); border-radius: 8px; }
+.ding-profile__summary small { color: #8a7a5c; font-size: 8px; }
+.ding-profile__summary strong { font-family: var(--display); font-size: 24px; }
+.ding-profile section h3 { margin: 20px 0 8px; color: #903835; font-size: 11px; }
+.ding-profile__grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+.ding-profile__grid span { padding: 8px 10px; display: flex; justify-content: space-between; gap: 8px; background: rgba(32, 67, 67, 0.05); border: 1px solid rgba(32, 67, 67, 0.12); border-radius: 6px; }
+.ding-profile__grid b { font-size: 10px; }
+.ding-profile__grid small { color: #7a8582; font-size: 8px; }
 
 .ding-modal {
   position: fixed;
@@ -324,6 +390,13 @@
 .ding-rules__grid b { color: #903835; font-size: 12px; }
 .ding-rules__grid { font-size: 8px; line-height: 1.45; }
 .ding-rules__scope { padding-left: 10px; border-left: 3px solid #b89358; color: #876d45 !important; font-size: 8px !important; }
+.ding-difficulty { margin: 18px 0 0; display: flex; flex-direction: column; gap: 8px; }
+.ding-difficulty > small { color: #8fa3a0; font-size: 9px; }
+.ding-difficulty > div { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.ding-difficulty button { min-height: 72px; padding: 9px; color: #244348; background: rgba(184, 147, 88, 0.08); border: 1px solid rgba(184, 147, 88, 0.3); border-radius: 8px; cursor: pointer; text-align: left; }
+.ding-difficulty button.is-selected { color: #f6ecd6; background: #244348; border-color: #244348; }
+.ding-difficulty strong { font-family: var(--display); font-size: 13px; }
+.ding-difficulty span { display: block; margin-top: 4px; color: inherit; font-size: 8px; line-height: 1.4; opacity: 0.8; }
 .ding-rules__enter {
   width: 100%;
   min-height: 52px;
@@ -350,6 +423,17 @@
 .ding-result__identities b { font-size: 12px; }
 .ding-result__identities small { grid-column: 2; grid-row: 1; color: #7a6a49; font-size: 9px; }
 .ding-result__identities em { grid-column: 1 / -1; color: #687a76; font-size: 9px; font-style: normal; }
+.ding-result__review { margin: 0 0 20px; }
+.ding-result__review > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.ding-result__review > header > strong { font-size: 11px; }
+.ding-result__review > header > div { display: flex; gap: 5px; }
+.ding-result__review > header button { min-height: 30px; padding: 0 10px; color: #7a6a49; background: transparent; border: 1px solid rgba(32, 55, 62, 0.2); border-radius: 999px; cursor: pointer; font-size: 8px; font-weight: 800; }
+.ding-result__review > header button.is-selected { color: #fff3dc; background: #2d5559; border-color: #2d5559; }
+.ding-result__review ol { max-height: 180px; overflow-y: auto; margin: 0; padding: 8px 10px; list-style: none; background: rgba(39, 75, 85, 0.05); border: 1px solid rgba(32, 55, 62, 0.14); border-radius: 8px 2px 8px 2px; }
+.ding-result__review li { display: grid; grid-template-columns: 34px 1fr; gap: 6px; padding: 5px 0; border-bottom: 1px solid rgba(32, 55, 62, 0.08); font-size: 8px; line-height: 1.45; }
+.ding-result__review li:last-child { border-bottom: 0; }
+.ding-result__review li small { color: #b89358; font-family: var(--utility); }
+.ding-result__review li span { color: #5f6d68; }
 .ding-result__actions { display: grid; gap: 8px; }
 .ding-result__actions button { min-height: 46px; color: #fff3dc; background: var(--dd-red); border: 0; border-radius: 999px; font-weight: 800; cursor: pointer; }
 .ding-result__actions button + button { color: #2d5559; background: rgba(44, 91, 94, 0.08); border: 1px solid rgba(40, 82, 88, 0.25); }

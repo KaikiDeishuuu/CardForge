@@ -115,6 +115,42 @@ export const CARD_CATALOG: Readonly<Record<string, DingCard>> = {
     tone: "#4f8a6d",
     description: "出牌阶段使用。所有已受伤的角色回复 1 点体力。",
   },
+  aid: {
+    id: "aid",
+    name: "援护",
+    kind: "trick",
+    type: "aid",
+    symbol: "援",
+    tone: "#5b8a72",
+    description: "出牌阶段对一名已受伤角色使用，令其回复 1 点体力；可被「无懈可击」抵消。",
+  },
+  "delay-play": {
+    id: "delay-play",
+    name: "断锋",
+    kind: "trick",
+    type: "delay-play",
+    symbol: "封",
+    tone: "#8a7a5c",
+    description: "出牌阶段对距离 1 的一名其他角色使用，置于其判定区。判定阶段翻开牌堆顶一张牌，若结果不是「刺击」，跳过其出牌阶段。",
+  },
+  "delay-draw": {
+    id: "delay-draw",
+    name: "困阵",
+    kind: "trick",
+    type: "delay-draw",
+    symbol: "困",
+    tone: "#6b7a8a",
+    description: "出牌阶段对距离 1 的一名其他角色使用，置于其判定区。判定阶段翻开牌堆顶一张牌，若结果不是锦囊，跳过其摸牌阶段。",
+  },
+  "delay-burn": {
+    id: "delay-burn",
+    name: "焚营",
+    kind: "trick",
+    type: "delay-burn",
+    symbol: "焚",
+    tone: "#a05a3e",
+    description: "出牌阶段对距离 1 的一名其他角色使用，置于其判定区。判定阶段翻开牌堆顶一张牌，若结果是锦囊，其受到你造成的 1 点伤害。",
+  },
   longblade: {
     id: "longblade",
     name: "长锋",
@@ -124,6 +160,16 @@ export const CARD_CATALOG: Readonly<Record<string, DingCard>> = {
     tone: "#8a7a50",
     range: 2,
     description: "武器：你的攻击范围变为 2。",
+  },
+  longshot: {
+    id: "longshot",
+    name: "穿云",
+    kind: "equipment",
+    type: "weapon",
+    symbol: "穿",
+    tone: "#6f7a8a",
+    range: 3,
+    description: "武器：你的攻击范围变为 3。",
   },
   repeater: {
     id: "repeater",
@@ -158,7 +204,7 @@ export const CARD_CATALOG: Readonly<Record<string, DingCard>> = {
 
 /**
  * M1.5 牌堆：即时锦囊加入约斗、合围、齐射与同袍，
- * 群体牌全部复用结算栈；后续里程碑再加入延时锦囊与武将技能。
+ * 群体牌全部复用结算栈；武将主动技与延时锦囊判定帧从 M3 起进入同一结算栈。
  */
 const DECK_RECIPE: readonly (keyof typeof CARD_CATALOG)[] = [
   "strike", "strike", "strike", "strike", "strike",
@@ -177,7 +223,12 @@ const DECK_RECIPE: readonly (keyof typeof CARD_CATALOG)[] = [
   "horde", "horde",
   "volley", "volley",
   "grove",
+  "aid", "aid",
+  "delay-play", "delay-play",
+  "delay-draw", "delay-draw",
+  "delay-burn",
   "longblade", "longblade",
+  "longshot",
   "repeater", "repeater",
   "swift", "swift",
   "bulwark", "bulwark",

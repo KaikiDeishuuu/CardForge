@@ -1,3 +1,4 @@
+import { DEFAULT_RULES, HIGH_PRESSURE_RULES, SINGLE_DECK_RULES } from "./engine";
 import type { TwentyOneRules, TwentyOneSettlement, TwentyOneState } from "./types";
 
 export type RulesPresetId = "standard-six" | "single-deck" | "high-pressure-eight" | "custom";
@@ -79,36 +80,10 @@ export interface ChallengeDefinition {
 export const CLASSIC_STARTING_CHIPS = 500;
 export const MINIMUM_PLAYABLE_CHIPS = 10;
 
-export const STANDARD_SIX_RULES: TwentyOneRules = {
-  deckCount: 6,
-  dealerSoft17: "stand",
-  blackjackPayout: "3:2",
-  maxPlayerHands: 4,
-  doubleAfterSplit: true,
-  resplitAces: false,
-  hitSplitAces: false,
-  allowInsurance: true,
-  allowLateSurrender: true,
-};
-
-export const SINGLE_DECK_RULES: TwentyOneRules = {
-  ...STANDARD_SIX_RULES,
-  deckCount: 1,
-  dealerSoft17: "hit",
-  maxPlayerHands: 3,
-  doubleAfterSplit: false,
-  allowLateSurrender: false,
-};
-
-export const HIGH_PRESSURE_EIGHT_RULES: TwentyOneRules = {
-  ...STANDARD_SIX_RULES,
-  deckCount: 8,
-  dealerSoft17: "hit",
-  blackjackPayout: "6:5",
-  maxPlayerHands: 2,
-  doubleAfterSplit: false,
-  allowLateSurrender: false,
-};
+// 预设规则以 engine 的常量为唯一来源，避免两处重复维护后漂移。
+export const STANDARD_SIX_RULES: TwentyOneRules = DEFAULT_RULES;
+export { SINGLE_DECK_RULES };
+export const HIGH_PRESSURE_EIGHT_RULES: TwentyOneRules = HIGH_PRESSURE_RULES;
 
 export const RULE_PRESETS: Readonly<Record<Exclude<RulesPresetId, "custom">, TwentyOneRules>> = {
   "standard-six": STANDARD_SIX_RULES,

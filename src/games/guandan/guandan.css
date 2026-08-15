@@ -815,6 +815,36 @@ button.gd-card:focus-visible {
   font-weight: 900;
 }
 
+.gd-save-warning {
+  margin: 10px 14px 0;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #6b3430;
+  background: #f2dfc1;
+  border: 1px solid rgba(155, 67, 58, 0.35);
+  border-radius: 3px 10px 3px 10px;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.gd-save-warning button {
+  min-height: 34px;
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  color: #f6e9d1;
+  background: #7a3835;
+  border: 1px solid #7a3835;
+  border-radius: 3px 8px 3px 8px;
+  cursor: pointer;
+}
+
+.gd-save-warning--inline {
+  margin: 0 0 18px;
+}
+
 .gd-modal {
   position: fixed;
   inset: 0;

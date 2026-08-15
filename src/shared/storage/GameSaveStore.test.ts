@@ -37,6 +37,20 @@ describe("GameSaveStore", () => {
     expect(loadGameSave("guandan")).toBeUndefined();
   });
 
+  it("ignores envelopes with negative, fractional or non-finite bookkeeping numbers", () => {
+    const cases = [
+      { schemaVersion: -1, savedAt: 1, snapshot: { gameId: "guandan", revision: 1, data: {} } },
+      { schemaVersion: 1.5, savedAt: 1, snapshot: { gameId: "guandan", revision: 1, data: {} } },
+      { schemaVersion: 1, savedAt: -1, snapshot: { gameId: "guandan", revision: 1, data: {} } },
+      { schemaVersion: 1, savedAt: 1, snapshot: { gameId: "guandan", revision: -2, data: {} } },
+      { schemaVersion: 1, savedAt: 1, snapshot: { gameId: "", revision: 1, data: {} } },
+    ];
+    for (const record of cases) {
+      window.localStorage.setItem("cardforge.save.guandan", JSON.stringify(record));
+      expect(loadGameSave("guandan")).toBeUndefined();
+    }
+  });
+
   it("clears saves and degrades gracefully when storage is unavailable", () => {
     saveGameSave("twenty-one", 1, 1, {});
     expect(loadGameSave("twenty-one")).toBeDefined();

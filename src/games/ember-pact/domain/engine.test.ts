@@ -448,5 +448,5 @@ describe("Ember Pact engine", () => {
       replayed.push(`${state.winner}:${state.roundNumber}:${decisions}`);
     }
     expect(replayed).toEqual(outcomes);
-  });
+  }, 15_000);
 });

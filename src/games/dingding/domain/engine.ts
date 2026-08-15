@@ -1,7 +1,8 @@
 import { CARD_CATALOG, IDENTITY_NAMES, SEAT_ORDER, buildDeck } from "./data";
-import { HERO_IDS, heroOf, type TriggerPoint } from "./heroes";
+import { HERO_IDS, heroOf, type ActiveSkillBuff, type ActiveSkillDefinition, type TriggerPoint } from "./heroes";
 import type {
   DingCard,
+  DingDifficulty,
   DingLogEntry,
   DingPlayer,
   DingState,
@@ -9,7 +10,9 @@ import type {
   IdentityId,
   LastDingAction,
   MatchWinner,
+  PendingDelayed,
   PendingDying,
+  PendingSkill,
   PendingTrick,
   PlayerId,
   ResolutionFrame,
@@ -20,6 +23,8 @@ export const DRAW_PER_TURN = 2;
 export const STARTING_HAND = 4;
 export const LORD_BONUS_HP = 1;
 export const BASE_MAX_HP = 4;
+/** 进入该回合组后，每跨过一个整轮对全体存活角色造成递增真实伤害（不会致死）。 */
+export const OVERHEAT_START_ROUND = 24;
 
 const IDENTITIES: readonly IdentityId[] = ["lord", "loyalist", "rebel", "renegade"];
 
@@ -81,6 +86,36 @@ function replacePlayer(players: readonly DingPlayer[], id: PlayerId, update: (pl
 
 function resetSkillFlags(players: readonly DingPlayer[]): DingPlayer[] {
   return players.map((player) => (Object.keys(player.skillFlags).length > 0 ? { ...player, skillFlags: {} } : player));
+}
+
+function activeSkillFlag(skillId: string): string {
+  return `active:${skillId}`;
+}
+
+function buffFlag(buff: ActiveSkillBuff): string {
+  return `buff:${buff}`;
+}
+
+function activeSkillTargets(state: DingState, skill: ActiveSkillDefinition): readonly PlayerId[] {
+  if (skill.target === "wounded") {
+    return state.players
+      .filter((player) => player.alive && player.hp < player.maxHp)
+      .map((player) => player.id);
+  }
+  return [];
+}
+
+function matchesSkillFilter(card: DingCard, filter?: "strike" | "evade" | "trick"): boolean {
+  if (filter === "strike") return card.type === "strike";
+  if (filter === "evade") return card.type === "evade";
+  if (filter === "trick") return card.kind === "trick";
+  return true;
+}
+
+function canPaySkillCost(actor: DingPlayer, skill: ActiveSkillDefinition): boolean {
+  if (skill.cost.kind === "none") return true;
+  const filter = skill.cost.kind === "discard" ? skill.cost.filter : undefined;
+  return actor.hand.some((card) => matchesSkillFilter(card, filter));
 }
 
 /** 在指定触发点结算拥有该技能的角色；一次性技能标记写入该角色的 skillFlags。 */
@@ -167,12 +202,15 @@ export function distanceBetween(players: readonly DingPlayer[], fromId: PlayerId
   const raw = seatDistance(from, to);
   const plusHorse = to.equipment.plusHorse ? 1 : 0;
   const minusHorse = from.equipment.minusHorse ? 1 : 0;
-  const skillModifier = (heroOf(from)?.distanceFromModifier ?? 0) + (heroOf(to)?.distanceToModifier ?? 0);
+  const skillModifier = (heroOf(from)?.distanceFromModifier ?? 0)
+    + (heroOf(to)?.distanceToModifier ?? 0)
+    + (to.skillFlags[buffFlag("distance-to-self")] ? 1 : 0);
   return Math.max(1, raw + plusHorse - minusHorse + skillModifier);
 }
 
 export function attackRange(player: DingPlayer): number {
-  return player.equipment.weapon?.range ?? 1;
+  const base = player.equipment.weapon?.range ?? 1;
+  return base + (player.skillFlags[buffFlag("attack-range")] ? 1 : 0);
 }
 
 function nextAliveId(players: readonly DingPlayer[], fromId: PlayerId): PlayerId {
@@ -232,7 +270,16 @@ function createTrickFrame(
   };
 }
 
-export function createInitialState(random: () => number = Math.random): DingState {
+export const DING_DIFFICULTY_NAMES: Readonly<Record<DingDifficulty, string>> = {
+  relaxed: "见习",
+  standard: "标准",
+  tactician: "战术",
+};
+
+export function createInitialState(
+  random: () => number = Math.random,
+  difficulty: DingDifficulty = "standard",
+): DingState {
   const deck = shuffled(buildDeck(), random);
   let rngSeed = Math.floor(random() * 2_147_483_647) || 1;
   const identities = shuffled(IDENTITIES, random);
@@ -276,11 +323,13 @@ export function createInitialState(random: () => number = Math.random): DingStat
     revision: 0,
     status: "playing",
     phase: "prepare",
+    difficulty,
     turnNumber: 1,
     activePlayerId: lord.id,
     players: dealt,
     deck: nextDeck,
     discard: nextDiscard,
+    delayedTricks: { south: [], east: [], north: [], west: [] },
     strikeUsed: false,
     stack: [],
     log: [{ id: 0, text: `四席就位。${lord.displayName}是主君，率先行动。` }],
@@ -325,6 +374,19 @@ export function getTargetOptions(state: DingState, actorId: PlayerId, card: Ding
     case "volley":
     case "grove":
       return [actor.id];
+    case "aid":
+      return state.players
+        .filter((candidate) => candidate.alive && candidate.hp < candidate.maxHp)
+        .map((candidate) => candidate.id);
+    case "delay-play":
+    case "delay-draw":
+    case "delay-burn":
+      return state.players
+        .filter((candidate) => candidate.id !== actor.id
+          && candidate.alive
+          && distanceBetween(state.players, actor.id, candidate.id) === 1
+          && (state.delayedTricks[candidate.id]?.length ?? 0) === 0)
+        .map((candidate) => candidate.id);
     case "weapon": {
       const current = actor.equipment.weapon;
       return !current || current.id !== card.id ? [actor.id] : [];
@@ -337,6 +399,132 @@ export function getTargetOptions(state: DingState, actorId: PlayerId, card: Ding
     case "nullify":
       return [];
   }
+}
+
+export function getActiveSkillUse(
+  state: DingState,
+  actorId: PlayerId,
+): { readonly skill: ActiveSkillDefinition; readonly targetIds: readonly PlayerId[] } | undefined {
+  if (state.status !== "playing" || state.phase !== "play" || state.stack.length > 0 || state.activePlayerId !== actorId) {
+    return undefined;
+  }
+  const actor = getPlayer(state.players, actorId);
+  if (!actor.alive) return undefined;
+  const skill = heroOf(actor)?.activeSkill;
+  if (!skill || actor.skillFlags[activeSkillFlag(skill.id)]) return undefined;
+  if (!canPaySkillCost(actor, skill)) return undefined;
+  const targetIds = activeSkillTargets(state, skill);
+  if (skill.target === "wounded" && targetIds.length === 0) return undefined;
+  return { skill, targetIds };
+}
+
+/** 出牌阶段发动主动技：不立刻结算，而是压入 PendingSkill 决策帧。 */
+export function activateSkill(state: DingState, actorId: PlayerId, skillId: string): DingState {
+  const offer = getActiveSkillUse(state, actorId);
+  if (!offer || offer.skill.id !== skillId) return state;
+  const actor = getPlayer(state.players, actorId);
+  const pending: PendingSkill = {
+    kind: "skill",
+    ownerId: actorId,
+    skillId: offer.skill.id,
+    prompt: offer.skill.prompt,
+    targetIds: offer.targetIds,
+  };
+  const players = replacePlayer(state.players, actorId, (player) => ({
+    ...player,
+    skillFlags: { ...player.skillFlags, [activeSkillFlag(skillId)]: true },
+  }));
+  return withAction(state, actorId, [`${actor.displayName}发动「${offer.skill.name}」。`], {
+    players,
+    stack: [...state.stack, pending],
+  });
+}
+
+export function respondToSkill(
+  state: DingState,
+  responderId: PlayerId,
+  decision?: { readonly cardUid?: string; readonly targetId?: PlayerId },
+): DingState {
+  const pending = topFrame(state.stack);
+  if (state.status !== "playing" || !pending || pending.kind !== "skill" || pending.ownerId !== responderId) return state;
+  const owner = getPlayer(state.players, responderId);
+  const skill = heroOf(owner)?.activeSkill;
+  if (!skill || skill.id !== pending.skillId) return state;
+  const remaining = state.stack.slice(0, -1);
+
+  // undefined 表示放弃；无消耗技能用空对象 {} 表示确认发动。
+  if (!decision) {
+    return withAction(state, responderId, [`${owner.displayName}放弃发动「${skill.name}」。`], { stack: remaining });
+  }
+
+  let costCard: DingCard | undefined;
+  if (skill.cost.kind === "discard") {
+    if (!decision.cardUid) return state;
+    const candidate = owner.hand.find((card) => card.id === decision.cardUid);
+    if (!candidate || !matchesSkillFilter(candidate, skill.cost.filter)) return state;
+    costCard = candidate;
+  } else if (decision.cardUid !== undefined) return state;
+
+  let target: DingPlayer | undefined;
+  if (skill.target === "wounded") {
+    if (!decision.targetId || !pending.targetIds.includes(decision.targetId)) return state;
+    target = getPlayer(state.players, decision.targetId);
+    if (target.hp >= target.maxHp) return state;
+  } else if (decision.targetId !== undefined) return state;
+
+  let players = state.players;
+  let discard = state.discard;
+  let deck = state.deck;
+  let rngSeed = state.rngSeed;
+  const texts: string[] = [];
+
+  if (costCard) {
+    players = replacePlayer(players, responderId, (player) => ({
+      ...player,
+      hand: player.hand.filter((card) => card.id !== costCard!.id),
+    }));
+    discard = [...discard, costCard];
+    texts.push(`${owner.displayName}弃置「${costCard.name}」发动「${skill.name}」。`);
+  } else {
+    texts.push(`${owner.displayName}发动「${skill.name}」。`);
+  }
+
+  if (skill.effect.kind === "heal-1") {
+    players = replacePlayer(players, target!.id, (player) => ({
+      ...player,
+      hp: player.hp + 1,
+    }));
+    texts.push(`${target!.displayName}回复 1 点体力。`);
+  } else if (skill.effect.kind === "draw") {
+    const drawn: DingCard[] = [];
+    for (let count = 0; count < skill.effect.count; count += 1) {
+      const draw = drawOne(deck, discard, rngSeed);
+      deck = draw.deck;
+      discard = draw.discard;
+      rngSeed = draw.seed;
+      if (draw.card) drawn.push(draw.card);
+    }
+    players = replacePlayer(players, responderId, (player) => ({
+      ...player,
+      hand: [...player.hand, ...drawn],
+    }));
+    texts.push(`${owner.displayName}摸 ${drawn.length} 张牌。`);
+  } else if (skill.effect.kind === "buff") {
+    const buff = skill.effect.buff;
+    players = replacePlayer(players, responderId, (player) => ({
+      ...player,
+      skillFlags: { ...player.skillFlags, [buffFlag(buff)]: true },
+    }));
+    texts.push(`${owner.displayName}获得本回合增益。`);
+  }
+
+  return withAction(state, responderId, texts, {
+    players,
+    discard,
+    deck,
+    rngSeed,
+    stack: remaining,
+  });
 }
 
 function takeRandomHandCard(hand: readonly DingCard[], seed: number): { card?: DingCard; hand: DingCard[]; seed: number } {
@@ -379,12 +567,19 @@ export function playCard(state: DingState, actorId: PlayerId, cardUid: string, t
   let stack: ResolutionFrame[] = [];
   let strikeUsed = state.strikeUsed;
   const texts = [`${actor.displayName}打出「${card.name}」。`];
+  const boostedStrike = card.type === "strike" && actor.skillFlags[buffFlag("next-strike-damage")] === true;
+  if (boostedStrike) {
+    players = replacePlayer(players, actorId, (player) => ({
+      ...player,
+      skillFlags: { ...player.skillFlags, [buffFlag("next-strike-damage")]: false },
+    }));
+  }
 
   switch (card.type) {
     case "strike": {
       if (!targetId) return state;
       const target = getPlayer(players, targetId);
-      stack = [{ kind: "strike", actorId, targetId, cardUid, damage: 1 }];
+      stack = [{ kind: "strike", actorId, targetId, cardUid, damage: boostedStrike ? 2 : 1 }];
       strikeUsed = true;
       discard = [...discard, card];
       texts.push(`${target.displayName}可以打出「闪避」响应。`);
@@ -405,9 +600,10 @@ export function playCard(state: DingState, actorId: PlayerId, cardUid: string, t
     case "duel":
     case "horde":
     case "volley":
-    case "grove": {
+    case "grove":
+    case "aid": {
       discard = [...discard, card];
-      const needsTarget = card.type === "dismantle" || card.type === "snatch" || card.type === "duel";
+      const needsTarget = card.type === "dismantle" || card.type === "snatch" || card.type === "duel" || card.type === "aid";
       const effectTarget = needsTarget ? targetId : undefined;
       if (needsTarget && !effectTarget) return state;
       stack = [createTrickFrame(state.revision + 1, actorId, cardUid, card.type, effectTarget, players)];
@@ -417,6 +613,18 @@ export function playCard(state: DingState, actorId: PlayerId, cardUid: string, t
           : `${actor.displayName}使用「${card.name}」，等待无懈可击响应。`,
       );
       break;
+    }
+    case "delay-play":
+    case "delay-draw":
+    case "delay-burn": {
+      if (!targetId) return state;
+      const target = getPlayer(players, targetId);
+      const delayedTricks = {
+        ...state.delayedTricks,
+        [targetId]: [...(state.delayedTricks[targetId] ?? []), { card, sourceActorId: actorId }],
+      };
+      texts.push(`${actor.displayName}对${target.displayName}使用「${card.name}」，其进入判定区。`);
+      return withAction({ ...state, players }, actorId, texts, { players, delayedTricks });
     }
     case "weapon":
     case "minus-horse":
@@ -540,6 +748,17 @@ function applyTrickEffect(
       ? { kind: "horde", actorId: actor.id, cardUid: frame.cardUid, responders, cursor: 0 }
       : { kind: "volley", actorId: actor.id, cardUid: frame.cardUid, responders, cursor: 0 }];
     draft.texts.push(`${actor.displayName}的「${cardName}」生效，按座位顺序逐席响应。`);
+    return;
+  }
+
+  if (frame.cardType === "aid" && frame.targetId) {
+    const target = getPlayer(draft.players, frame.targetId);
+    if (target.alive && target.hp < target.maxHp) {
+      draft.players = replacePlayer(draft.players, target.id, (player) => ({ ...player, hp: player.hp + 1 }));
+      draft.texts.push(`${actor.displayName}的「${cardName}」生效，${target.displayName}回复 1 点体力。`);
+    } else {
+      draft.texts.push(`${actor.displayName}的「${cardName}」生效，但目标已无需回复。`);
+    }
     return;
   }
 
@@ -754,11 +973,24 @@ function damagePlayer(
   sourceId: PlayerId,
 ): DingState {
   const target = getPlayer(state.players, targetId);
-  const nextHp = target.hp - amount;
-  const players = replacePlayer(state.players, targetId, (player) => ({ ...player, hp: nextHp }));
-  let next: DingState = withAction(state, sourceId, [`${target.displayName}受到 ${amount} 点伤害。`], { players });
-  next = runSkillTrigger(next, "damageDealt", sourceId);
-  next = runSkillTrigger(next, "damageReceived", targetId);
+  const reduction = target.skillFlags[buffFlag("next-damage-reduction")] ? 1 : 0;
+  const finalAmount = Math.max(0, amount - reduction);
+  const nextHp = target.hp - finalAmount;
+
+  let players = replacePlayer(state.players, targetId, (player) => ({
+    ...player,
+    hp: nextHp,
+    ...(reduction > 0 ? { skillFlags: { ...player.skillFlags, [buffFlag("next-damage-reduction")]: false } } : {}),
+  }));
+  const texts: string[] = [];
+  if (reduction > 0) texts.push(`${target.displayName}的增益抵挡了 1 点伤害。`);
+  if (finalAmount > 0) texts.push(`${target.displayName}受到 ${finalAmount} 点伤害。`);
+
+  let next = withAction(state, sourceId, texts, { players });
+  if (finalAmount > 0) {
+    next = runSkillTrigger(next, "damageDealt", sourceId);
+    next = runSkillTrigger(next, "damageReceived", targetId);
+  }
 
   if (nextHp <= 0) {
     const required = 1 - nextHp;
@@ -768,8 +1000,54 @@ function damagePlayer(
       stack: [...next.stack, pending],
     });
     next = runSkillTrigger(next, "enterDying", targetId);
+
+    const dyingTarget = getPlayer(next.players, targetId);
+    if (dyingTarget.skillFlags[buffFlag("dying-draw")]) {
+      const draw = drawOne(next.deck, next.discard, next.rngSeed);
+      if (draw.card) {
+        players = replacePlayer(next.players, targetId, (player) => ({
+          ...player,
+          hand: [...player.hand, draw.card!],
+          skillFlags: { ...player.skillFlags, [buffFlag("dying-draw")]: false },
+        }));
+        next = withAction(next, targetId, [`${dyingTarget.displayName}的「余烬」触发，摸 1 张牌。`], {
+          players,
+          deck: draw.deck,
+          discard: draw.discard,
+          rngSeed: draw.seed,
+        });
+      } else {
+        players = replacePlayer(next.players, targetId, (player) => ({
+          ...player,
+          skillFlags: { ...player.skillFlags, [buffFlag("dying-draw")]: false },
+        }));
+        next = withAction(next, targetId, [`${dyingTarget.displayName}的「余烬」触发，但牌堆已空。`], { players });
+      }
+    }
   }
   return next;
+}
+
+type DeathReward =
+  | { readonly kind: "killer-draw"; readonly count: 3 }
+  | { readonly kind: "killer-discard-hand" };
+
+/**
+ * 身份奖惩表：与胜负判定分离，只根据退场者与击杀者的公开身份给出奖惩。
+ * 流谋的奖励被刻意取消，以维持其“最后独活”的特殊胜利路径。
+ */
+function deathReward(target: DingPlayer, killer: DingPlayer | undefined): DeathReward | undefined {
+  if (!killer?.alive || killer.id === target.id) return undefined;
+  if (target.identity === "rebel") {
+    return killer.identity === "renegade" ? undefined : { kind: "killer-draw", count: 3 };
+  }
+  if (target.identity === "lord" && killer.identity === "rebel") {
+    return { kind: "killer-draw", count: 3 };
+  }
+  if (target.identity === "loyalist" && killer.identity === "lord") {
+    return { kind: "killer-discard-hand" };
+  }
+  return undefined;
 }
 
 function resolveDeath(state: DingState, targetId: PlayerId, sourceId: PlayerId | undefined, stack: readonly ResolutionFrame[]): DingState {
@@ -777,7 +1055,8 @@ function resolveDeath(state: DingState, targetId: PlayerId, sourceId: PlayerId |
   const equipmentCards = (["weapon", "minusHorse", "plusHorse"] as const)
     .map((slot) => target.equipment[slot])
     .filter((card): card is DingCard => Boolean(card));
-  const corpseCards = [...target.hand, ...equipmentCards];
+  const delayedCards = (state.delayedTricks[targetId] ?? []).map((entry) => entry.card);
+  const corpseCards = [...target.hand, ...equipmentCards, ...delayedCards];
   let players = replacePlayer(state.players, targetId, (player) => ({
     ...player,
     alive: false,
@@ -787,31 +1066,34 @@ function resolveDeath(state: DingState, targetId: PlayerId, sourceId: PlayerId |
     equipment: {},
   }));
   const texts = [`${target.displayName}退场，身份是「${IDENTITY_NAMES[target.identity]}」。`];
-  if (corpseCards.length > 0) texts.push(`${target.displayName}的 ${corpseCards.length} 张手牌与装备进入弃牌堆。`);
+  if (corpseCards.length > 0) texts.push(`${target.displayName}的 ${corpseCards.length} 张手牌、装备与判定区牌进入弃牌堆。`);
 
   let deck = state.deck;
   let discard = [...state.discard, ...corpseCards];
   let rngSeed = state.rngSeed;
   const killer = sourceId ? players.find((player) => player.id === sourceId) : undefined;
-  if (killer?.alive && target.identity === "rebel") {
+  const reward = deathReward(target, killer);
+  if (reward?.kind === "killer-draw") {
     const drawn: DingCard[] = [];
-    for (let count = 0; count < 3; count += 1) {
+    for (let count = 0; count < reward.count; count += 1) {
       const draw = drawOne(deck, discard, rngSeed);
       deck = draw.deck;
       discard = draw.discard;
       rngSeed = draw.seed;
       if (draw.card) drawn.push(draw.card);
     }
-    players = replacePlayer(players, killer.id, (player) => ({ ...player, hand: [...player.hand, ...drawn] }));
-    texts.push(`${killer.displayName}击退叛锋，摸 ${drawn.length} 张牌。`);
-  }
-  if (killer?.alive && killer.identity === "lord" && target.identity === "loyalist") {
-    const discardedHand = killer.hand;
-    players = replacePlayer(players, killer.id, (player) => ({ ...player, hand: [] }));
+    players = replacePlayer(players, killer!.id, (player) => ({ ...player, hand: [...player.hand, ...drawn] }));
+    texts.push(target.identity === "rebel"
+      ? `${killer!.displayName}击退叛锋，摸 ${drawn.length} 张牌。`
+      : `${killer!.displayName}击退主君，摸 ${drawn.length} 张牌。`);
+  } else if (reward?.kind === "killer-discard-hand") {
+    const discardedHand = killer!.hand;
+    players = replacePlayer(players, killer!.id, (player) => ({ ...player, hand: [] }));
     discard = [...discard, ...discardedHand];
     texts.push(`主君误伤辅臣，弃置全部 ${discardedHand.length} 张手牌。`);
   }
 
+  const delayedTricks = { ...state.delayedTricks, [targetId]: [] };
   const winner = evaluateWinner(players);
   if (winner) {
     texts.push(winnerText(winner));
@@ -820,6 +1102,7 @@ function resolveDeath(state: DingState, targetId: PlayerId, sourceId: PlayerId |
       deck,
       discard,
       rngSeed,
+      delayedTricks,
       stack,
       status: "finished",
       phase: "finished",
@@ -832,6 +1115,7 @@ function resolveDeath(state: DingState, targetId: PlayerId, sourceId: PlayerId |
     deck,
     discard,
     rngSeed,
+    delayedTricks,
     stack,
   });
   return settleTrickFrames(resolved, resolved.stack);
@@ -878,10 +1162,34 @@ export function respondToStrike(state: DingState, responderId: PlayerId, cardUid
     discard = [...discard, card];
     texts.push(`${responder.displayName}打出「闪避」，抵消了刺击。`);
   } else {
+    const target = getPlayer(state.players, pending.targetId);
+    const protector = target.identity === "lord"
+      ? state.players.find((player) => player.identity === "loyalist" && player.alive)
+      : undefined;
+    const protectionCost = protector?.hand[0];
+    let protectedPlayers = state.players;
+    let protectedDiscard = state.discard;
+    let finalDamage = pending.damage;
+    if (protectionCost) {
+      protectedPlayers = replacePlayer(state.players, protector!.id, (player) => ({
+        ...player,
+        hand: player.hand.filter((entry) => entry.id !== protectionCost.id),
+      }));
+      protectedDiscard = [...state.discard, protectionCost];
+      finalDamage = Math.max(0, pending.damage - 1);
+      texts.push(`${protector!.displayName}弃置「${protectionCost.name}」护主，为主君抵挡 1 点伤害。`);
+    }
+    if (finalDamage === 0) {
+      texts.push(`${responder.displayName}选择承受这一击。`);
+      return withAction({ ...state, stack, players: protectedPlayers, discard: protectedDiscard }, pending.actorId, texts, {
+        players: protectedPlayers,
+        discard: protectedDiscard,
+      });
+    }
     const next = damagePlayer(
-      { ...state, stack },
+      { ...state, stack, players: protectedPlayers, discard: protectedDiscard },
       pending.targetId,
-      pending.damage,
+      finalDamage,
       pending.actorId,
     );
     texts.push(`${responder.displayName}选择承受这一击。`);
@@ -979,20 +1287,110 @@ export function endTurn(state: DingState, actorId: PlayerId): DingState {
   return settleEnd(next);
 }
 
+function roundOfTurn(turnNumber: number): number {
+  return Math.ceil(turnNumber / 4);
+}
+
+function applyGlobalOverheat(players: readonly DingPlayer[], roundNumber: number): { players: DingPlayer[]; texts: string[] } {
+  const amount = roundNumber - OVERHEAT_START_ROUND + 1;
+  if (amount <= 0) return { players: [...players], texts: [] };
+  let next = [...players];
+  const texts: string[] = [];
+  for (const player of [...next]) {
+    if (!player.alive || player.hp <= 1) continue;
+    const applied = Math.min(amount, player.hp - 1);
+    if (applied <= 0) continue;
+    next = replacePlayer(next, player.id, (entry) => ({ ...entry, hp: entry.hp - applied }));
+    texts.push(`${player.displayName}受牌局过载影响，受到 ${applied} 点真实伤害。`);
+  }
+  return { players: next, texts };
+}
+
 function settleEnd(state: DingState): DingState {
   if (state.status !== "playing") return state;
   const actor = getPlayer(state.players, state.activePlayerId);
   const triggered = runSkillTrigger(state, "turnEnd", actor.id);
-  const players = resetSkillFlags(triggered.players);
-  const nextId = nextAliveId(players, actor.id);
+  let players = resetSkillFlags(triggered.players);
   const texts = [`${actor.displayName}的回合结束。`];
   if (state.phase === "discard") texts.unshift(`${actor.displayName}完成弃牌。`);
+
+  const currentRound = roundOfTurn(state.turnNumber);
+  const nextTurn = state.turnNumber + 1;
+  const nextRound = roundOfTurn(nextTurn);
+  if (nextRound > currentRound && nextRound >= OVERHEAT_START_ROUND) {
+    const overheat = applyGlobalOverheat(players, nextRound);
+    players = overheat.players;
+    texts.push(...overheat.texts);
+  }
+
+  const nextId = nextAliveId(players, actor.id);
   return withAction(triggered, "table", texts, {
     phase: "prepare",
     activePlayerId: nextId,
-    turnNumber: state.turnNumber + 1,
+    turnNumber: nextTurn,
     strikeUsed: false,
     players,
+  });
+}
+
+export function respondToDelayed(state: DingState, judgeId: PlayerId): DingState {
+  const pending = topFrame(state.stack);
+  if (state.status !== "playing" || !pending || pending.kind !== "delayed" || pending.ownerId !== judgeId) return state;
+  const owner = getPlayer(state.players, judgeId);
+  const instance = state.delayedTricks[judgeId]?.find((entry) => entry.card.id === pending.cardUid);
+  if (!instance) return state;
+
+  let deck = state.deck;
+  let discard = state.discard;
+  let rngSeed = state.rngSeed;
+  const judged = drawOne(deck, discard, rngSeed);
+  deck = judged.deck;
+  discard = [...judged.discard, ...(judged.card ? [judged.card] : [])];
+  rngSeed = judged.seed;
+
+  const delayedTricks = {
+    ...state.delayedTricks,
+    [judgeId]: (state.delayedTricks[judgeId] ?? []).filter((entry) => entry.card.id !== instance.card.id),
+  };
+  discard = [...discard, instance.card];
+  const remaining = state.stack.slice(0, -1);
+  const texts = judged.card
+    ? [`${owner.displayName}判定「${instance.card.name}」，翻开「${judged.card.name}」。`]
+    : [`${owner.displayName}判定「${instance.card.name}」，但牌堆已无牌可翻。`];
+  let next = withAction(state, "table", texts, {
+    deck,
+    discard,
+    rngSeed,
+    delayedTricks,
+    stack: remaining,
+  });
+  if (!judged.card) return next;
+
+  let players = next.players;
+  if (instance.card.type === "delay-play" && judged.card.type !== "strike") {
+    players = replacePlayer(players, judgeId, (player) => ({
+      ...player,
+      skillFlags: { ...player.skillFlags, "delay:skip-play": true },
+    }));
+    next = withAction(next, "table", [`${owner.displayName}受「断锋」影响，跳过出牌阶段。`], { players });
+  } else if (instance.card.type === "delay-draw" && judged.card.kind !== "trick") {
+    players = replacePlayer(players, judgeId, (player) => ({
+      ...player,
+      skillFlags: { ...player.skillFlags, "delay:skip-draw": true },
+    }));
+    next = withAction(next, "table", [`${owner.displayName}受「困阵」影响，跳过摸牌阶段。`], { players });
+  } else if (instance.card.type === "delay-burn" && judged.card.kind === "trick") {
+    next = damagePlayer(next, judgeId, 1, instance.sourceActorId);
+  } else {
+    next = withAction(next, "table", [`${instance.card.name}未生效。`], {});
+  }
+  return next;
+}
+
+export function changeDifficulty(state: DingState, difficulty: DingDifficulty): DingState {
+  if (state.difficulty === difficulty) return state;
+  return withAction(state, "table", [`对手难度调整为「${DING_DIFFICULTY_NAMES[difficulty]}」。`], {
+    difficulty,
   });
 }
 
@@ -1002,25 +1400,69 @@ export function advancePhase(state: DingState): DingState {
 
   if (state.phase === "prepare") {
     const triggered = runSkillTrigger(state, "turnStart", actor.id);
-    return withAction(triggered, "table", [`${actor.displayName}进入回合。`], { phase: "draw" });
+    return withAction(triggered, "table", [`${actor.displayName}进入回合。`], { phase: "judge" });
+  }
+  if (state.phase === "judge") {
+    const instance = state.delayedTricks[actor.id]?.[0];
+    if (!instance) {
+      return withAction(state, "table", [`${actor.displayName}无需判定，进入摸牌阶段。`], { phase: "draw" });
+    }
+    const pending: PendingDelayed = {
+      kind: "delayed",
+      ownerId: actor.id,
+      cardUid: instance.card.id,
+      sourceActorId: instance.sourceActorId,
+    };
+    return withAction(state, "table", [`${actor.displayName}准备判定「${instance.card.name}」。`], {
+      stack: [...state.stack, pending],
+    });
   }
   if (state.phase === "draw") {
+    const skipDraw = actor.skillFlags["delay:skip-draw"] === true;
     let deck = state.deck;
     let discard = state.discard;
     let rngSeed = state.rngSeed;
+    let players = state.players;
     const drawn: DingCard[] = [];
-    for (let count = 0; count < DRAW_PER_TURN; count += 1) {
-      const draw = drawOne(deck, discard, rngSeed);
-      deck = draw.deck;
-      discard = draw.discard;
-      rngSeed = draw.seed;
-      if (draw.card) drawn.push(draw.card);
+    const texts: string[] = [];
+
+    if (skipDraw) {
+      players = replacePlayer(players, actor.id, (player) => ({
+        ...player,
+        skillFlags: { ...player.skillFlags, "delay:skip-draw": false },
+      }));
+      texts.push(`${actor.displayName}跳过摸牌阶段。`);
+    } else {
+      for (let count = 0; count < DRAW_PER_TURN; count += 1) {
+        const draw = drawOne(deck, discard, rngSeed);
+        deck = draw.deck;
+        discard = draw.discard;
+        rngSeed = draw.seed;
+        if (draw.card) drawn.push(draw.card);
+      }
+      players = replacePlayer(players, actor.id, (player) => ({
+        ...player,
+        hand: [...player.hand, ...drawn],
+      }));
+      texts.push(`${actor.displayName}摸 ${drawn.length} 张牌。`);
     }
-    const players = replacePlayer(state.players, actor.id, (player) => ({
-      ...player,
-      hand: [...player.hand, ...drawn],
-    }));
-    return withAction(state, "table", [`${actor.displayName}摸 ${drawn.length} 张牌。`], {
+
+    if (players.find((player) => player.id === actor.id)?.skillFlags["delay:skip-play"] === true) {
+      players = replacePlayer(players, actor.id, (player) => ({
+        ...player,
+        skillFlags: { ...player.skillFlags, "delay:skip-play": false },
+      }));
+      texts.push(`${actor.displayName}跳过出牌阶段。`);
+      return withAction(state, "table", texts, {
+        players,
+        deck,
+        discard,
+        rngSeed,
+        phase: "discard",
+      });
+    }
+
+    return withAction(state, "table", texts, {
       players,
       deck,
       discard,

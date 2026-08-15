@@ -2,7 +2,8 @@ import type { CardIdentity, ControllerKind, ParticipantIdentity } from "../../..
 
 export type IdentityId = "lord" | "loyalist" | "rebel" | "renegade";
 export type MatchWinner = "lord-side" | "rebel" | "renegade";
-export type DingPhase = "prepare" | "draw" | "play" | "discard" | "finished";
+export type DingPhase = "prepare" | "judge" | "draw" | "play" | "discard" | "finished";
+export type DingDifficulty = "relaxed" | "standard" | "tactician";
 export type DingCardKind = "basic" | "trick" | "equipment";
 export type DingCardType =
   | "strike"
@@ -16,11 +17,15 @@ export type DingCardType =
   | "horde"
   | "volley"
   | "grove"
+  | "aid"
   | "weapon"
   | "minus-horse"
-  | "plus-horse";
+  | "plus-horse"
+  | "delay-play"
+  | "delay-draw"
+  | "delay-burn";
 /** 会进入结算栈、可被「无懈可击」响应的锦囊类型。 */
-export type TrickCardType = "focus" | "dismantle" | "snatch" | "nullify" | "duel" | "horde" | "volley" | "grove";
+export type TrickCardType = "focus" | "dismantle" | "snatch" | "nullify" | "duel" | "horde" | "volley" | "grove" | "aid";
 export type EquipmentSlot = "weapon" | "minusHorse" | "plusHorse";
 export type PlayerId = "south" | "east" | "north" | "west";
 
@@ -84,6 +89,19 @@ export interface PendingDying {
   readonly sourceId?: PlayerId;
 }
 
+/**
+ * 可选武将技能：与锦囊/濒死一样进入结算栈，由技能拥有者选择消耗与目标，
+ * 或放弃发动。M3 为 8 名武将各提供一个主动技。
+ */
+export interface PendingSkill {
+  readonly kind: "skill";
+  readonly ownerId: PlayerId;
+  readonly skillId: string;
+  readonly prompt: string;
+  /** 当前可选的合法目标；至少一名，否则技能不会进入栈。 */
+  readonly targetIds: readonly PlayerId[];
+}
+
 export interface PendingTrick {
   readonly kind: "trick";
   /** 在本次牌局内唯一，无懈可击用它指向被反制的帧。 */
@@ -102,6 +120,21 @@ export interface PendingTrick {
   readonly awaitingResponse: boolean;
   /** 被另一张无懈可击抵消的帧，结算时只弹出、不生效。 */
   readonly negated?: boolean;
+}
+
+export interface DelayedTrickInstance {
+  readonly card: DingCard;
+  /** 延时牌的使用者，用于焚营等伤害来源。 */
+  readonly sourceActorId: PlayerId;
+}
+
+export interface PendingDelayed {
+  readonly kind: "delayed";
+  /** 判定区所有者，也是当前回合角色。 */
+  readonly ownerId: PlayerId;
+  readonly cardUid: string;
+  /** 延时牌的使用者，用于焚营等伤害来源。 */
+  readonly sourceActorId: PlayerId;
 }
 
 export interface PendingDuel {
@@ -134,7 +167,7 @@ export interface PendingVolley {
   readonly cursor: number;
 }
 
-export type ResolutionFrame = PendingStrike | PendingDying | PendingTrick | PendingDuel | PendingHorde | PendingVolley;
+export type ResolutionFrame = PendingStrike | PendingDying | PendingSkill | PendingTrick | PendingDuel | PendingHorde | PendingVolley | PendingDelayed;
 
 export interface DingLogEntry {
   readonly id: number;
@@ -152,12 +185,15 @@ export interface DingState {
   readonly revision: number;
   readonly status: "playing" | "finished";
   readonly winner?: MatchWinner;
+  readonly difficulty: DingDifficulty;
   readonly phase: DingPhase;
   readonly turnNumber: number;
   readonly activePlayerId: PlayerId;
   readonly players: readonly DingPlayer[];
   readonly deck: readonly DingCard[];
   readonly discard: readonly DingCard[];
+  /** 各角色判定区中的延时锦囊；判定结算后进入弃牌堆。 */
+  readonly delayedTricks: Readonly<Record<PlayerId, readonly DelayedTrickInstance[]>>;
   readonly strikeUsed: boolean;
   /** 结算栈：栈顶是当前等待响应的结算，空栈表示没有待处理结算。 */
   readonly stack: readonly ResolutionFrame[];
@@ -167,8 +203,7 @@ export interface DingState {
   readonly rngSeed: number;
 }
 
-export interface DingAiMove {
-  readonly kind: "play" | "end";
-  readonly cardUid?: string;
-  readonly targetId?: PlayerId;
-}
+export type DingAiMove =
+  | { readonly kind: "play"; readonly cardUid: string; readonly targetId?: PlayerId }
+  | { readonly kind: "skill"; readonly skillId: string }
+  | { readonly kind: "end" };

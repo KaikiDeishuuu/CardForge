@@ -23,4 +23,26 @@ describe("Guandan persistence", () => {
     expect(restoreGuandanState(tampered({ activePlayerId: "nobody" }))).toBeUndefined();
     expect(restoreGuandanState(tampered({ match: { dealNumber: 1 } }))).toBeUndefined();
   });
+
+  it("rejects structurally broken but superficially JSON-valid tables", () => {
+    const base = JSON.parse(JSON.stringify(createInitialState(() => 0.37)));
+
+    const emptyActiveHand = JSON.parse(JSON.stringify(base));
+    emptyActiveHand.players.find((player: { id: string }) => player.id === "human").hand = [];
+    expect(restoreGuandanState(emptyActiveHand)).toBeUndefined();
+
+    const duplicateId = JSON.parse(JSON.stringify(base));
+    duplicateId.players[1].id = "human";
+    duplicateId.players[1].team = "vermillion";
+    duplicateId.players[1].controller = "ai";
+    expect(restoreGuandanState(duplicateId)).toBeUndefined();
+
+    const levelMismatch = JSON.parse(JSON.stringify(base));
+    levelMismatch.match.levels.vermillion = "A";
+    expect(restoreGuandanState(levelMismatch)).toBeUndefined();
+
+    const badPlace = JSON.parse(JSON.stringify(base));
+    badPlace.players[0].finishedPlace = 99;
+    expect(restoreGuandanState(badPlace)).toBeUndefined();
+  });
 });

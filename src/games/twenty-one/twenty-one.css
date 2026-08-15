@@ -1565,6 +1565,41 @@
   cursor: pointer;
 }
 
+.tw-save-warning {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #6d3039;
+  background: rgba(124, 47, 59, 0.08);
+  border: 1px solid rgba(124, 47, 59, 0.25);
+  border-radius: 3px 8px 3px 8px;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.tw-save-warning button {
+  min-height: 34px;
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  color: #f6efe2;
+  background: #6d3039;
+  border: 1px solid #6d3039;
+  border-radius: 3px 8px 3px 8px;
+  cursor: pointer;
+}
+
+.tw-save-warning--banner {
+  position: fixed;
+  z-index: 30;
+  top: max(72px, calc(env(safe-area-inset-top) + 60px));
+  left: 50%;
+  width: min(420px, calc(100% - 28px));
+  transform: translateX(-50%);
+}
+
 .tw-ledger-tabs {
   margin: 18px 0;
   display: grid;

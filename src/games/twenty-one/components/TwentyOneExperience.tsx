@@ -112,9 +112,10 @@ interface ActiveTableProps {
   setRoot: Dispatch<SetStateAction<TwentyOneRootState>>;
   onExit: () => void;
   restoredNotice: boolean;
+  saveUnavailable: boolean;
 }
 
-function ActiveTable({ root, setRoot, onExit, restoredNotice }: ActiveTableProps) {
+function ActiveTable({ root, setRoot, onExit, restoredNotice, saveUnavailable }: ActiveTableProps) {
   const session = root.activeSession!;
   const state = session.table;
   const [ledgerOpen, setLedgerOpen] = useState(false);
@@ -218,6 +219,7 @@ function ActiveTable({ root, setRoot, onExit, restoredNotice }: ActiveTableProps
       </header>
 
       {restoredNotice && <div className="tw-restore-notice" role="status">已恢复{challenge ? `${challenge.name} ${session.roundsCompleted}/${challenge.roundLimit}` : `经典牌桌第 ${state.handNumber} 手`}</div>}
+      {saveUnavailable && <div className="tw-save-warning tw-save-warning--banner" role="alert">本机存档不可用，本次进度只在当前页面保留。</div>}
 
       <section className="twenty-one-table" aria-label="二十一刻牌桌">
         <div className="twenty-one-table__arc" aria-hidden="true" />
@@ -355,8 +357,11 @@ export function TwentyOneExperience({ onExit, persistence }: GameRuntimeProps) {
       : undefined,
     [persistence],
   );
+  const unreadableRestoredSave = Boolean(persistence?.restored && !restored);
   const [root, setRoot] = useState<TwentyOneRootState>(() => restored ?? createDefaultRootState());
   const [restoredNotice, setRestoredNotice] = useState(Boolean(restored?.activeSession));
+  const [saveBlocked, setSaveBlocked] = useState(unreadableRestoredSave);
+  const [saveUnavailable, setSaveUnavailable] = useState(false);
   const { enabled: soundEnabled, toggle: toggleSound, play: playSound } = useSound();
   const setupVisible = root.activeSession === undefined;
   const setupRef = useModalFocus({
@@ -366,15 +371,24 @@ export function TwentyOneExperience({ onExit, persistence }: GameRuntimeProps) {
   });
 
   useEffect(() => {
-    if (!persistence || (root.revision === 0 && !persistence.restored)) return;
-    persistence.save(TWENTY_ONE_SAVE_SCHEMA_VERSION, root.revision, serializeTwentyOneRootState(root));
-  }, [persistence, root]);
+    if (!persistence || saveBlocked || (root.revision === 0 && !persistence.restored)) return;
+    const saved = persistence.save(TWENTY_ONE_SAVE_SCHEMA_VERSION, root.revision, serializeTwentyOneRootState(root));
+    if (saved) return;
+    const timer = window.setTimeout(() => setSaveUnavailable(true), 0);
+    return () => window.clearTimeout(timer);
+  }, [persistence, root, saveBlocked]);
 
   useEffect(() => {
     if (!restoredNotice) return;
     const timer = window.setTimeout(() => setRestoredNotice(false), 2800);
     return () => window.clearTimeout(timer);
   }, [restoredNotice]);
+
+  function resetUnreadableSave() {
+    persistence?.clear();
+    setSaveBlocked(false);
+    setSaveUnavailable(false);
+  }
 
   function startClassic(rules: TwentyOneRules, assistEnabled: boolean) {
     setRoot((current) => {
@@ -395,7 +409,7 @@ export function TwentyOneExperience({ onExit, persistence }: GameRuntimeProps) {
   }
 
   if (root.activeSession) {
-    return <ActiveTable root={root} setRoot={setRoot} onExit={onExit} restoredNotice={restoredNotice} />;
+    return <ActiveTable root={root} setRoot={setRoot} onExit={onExit} restoredNotice={restoredNotice} saveUnavailable={saveUnavailable} />;
   }
 
   return (
@@ -415,6 +429,12 @@ export function TwentyOneExperience({ onExit, persistence }: GameRuntimeProps) {
           onStartClassic={startClassic}
           onStartChallenge={startChallenge}
           onResetArchive={() => setRoot((current) => resetArchive(current))}
+          saveWarning={saveBlocked
+            ? "现有存档无法安全读取，本次不会覆盖它。"
+            : saveUnavailable
+              ? "本机存档不可用，本次进度只在当前页面保留。"
+              : undefined}
+          onResetSave={saveBlocked ? resetUnreadableSave : undefined}
         />
       </div>
     </main>

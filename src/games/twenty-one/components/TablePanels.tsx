@@ -108,6 +108,9 @@ interface SetupLedgerProps {
   onStartClassic: (rules: TwentyOneRules, assistEnabled: boolean) => void;
   onStartChallenge: (challengeId: ChallengeId, assistEnabled: boolean) => void;
   onResetArchive: () => void;
+  /** 存档无法安全读取时显示，并允许玩家显式清除旧档后重新启用保存。 */
+  saveWarning?: string;
+  onResetSave?: () => void;
 }
 
 export function SetupLedger({
@@ -118,6 +121,8 @@ export function SetupLedger({
   onStartClassic,
   onStartChallenge,
   onResetArchive,
+  saveWarning,
+  onResetSave,
 }: SetupLedgerProps) {
   const [choice, setChoice] = useState<SetupChoice>("classic");
   const [rules, setRules] = useState(root.preferences.rules);
@@ -173,6 +178,12 @@ export function SetupLedger({
           </span>
         ) : <button type="button" onClick={() => setConfirmReset(true)}>清空统计</button>}
       </div>
+      {saveWarning && (
+        <div className="tw-save-warning" role="alert">
+          <span>{saveWarning}</span>
+          {onResetSave && <button type="button" onClick={onResetSave}>重置旧存档并启用保存</button>}
+        </div>
+      )}
       <button
         type="button"
         className="rule-ledger__enter"

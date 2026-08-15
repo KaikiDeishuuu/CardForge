@@ -39,6 +39,12 @@ jobs:
       - name: Build production bundle
         run: npm run build
 
+      - name: Run Ember Pact balance baseline
+        run: npm run test:balance:ember
+
+      - name: Run Ding Ding balance baseline
+        run: npm run test:balance:dingding
+
       - name: Install browser
         run: npx playwright install --with-deps chromium
 

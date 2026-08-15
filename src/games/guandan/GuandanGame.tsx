@@ -58,7 +58,10 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
       : undefined,
     [persistence],
   );
+  const unreadableRestoredSave = Boolean(persistence?.restored && !restored);
   const [state, setState] = useState(() => restored ?? createInitialState());
+  const [saveBlocked, setSaveBlocked] = useState(unreadableRestoredSave);
+  const [saveUnavailable, setSaveUnavailable] = useState(false);
   const [selectedIds, setSelectedIds] = useState<readonly string[]>([]);
   const [showRules, setShowRules] = useState(restored === undefined);
   const [showLog, setShowLog] = useState(false);
@@ -113,7 +116,7 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
   // 连续升级对局跨刷新存续：下一局、级别与胜负都随状态落盘；
   // 只有整场打过 A（或玩家主动再来一场）才清除旧档。
   useEffect(() => {
-    if (!persistence) return;
+    if (!persistence || saveBlocked) return;
     if (state.match.champion) {
       persistence.clear();
       return;
@@ -122,8 +125,18 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
     // 「进过牌桌但什么都没做」也当作可续玩的对局。下一局与再来一场
     // 产生的新局在有旧档时会在这里直接覆盖它。
     if (state.revision === 0 && !persistence.restored) return;
-    persistence.save(GUANDAN_SAVE_SCHEMA_VERSION, state.revision, serializeGuandanState(state));
-  }, [persistence, state]);
+    const saved = persistence.save(GUANDAN_SAVE_SCHEMA_VERSION, state.revision, serializeGuandanState(state));
+    if (saved) return;
+    const timer = window.setTimeout(() => setSaveUnavailable(true), 0);
+    return () => window.clearTimeout(timer);
+  }, [persistence, saveBlocked, state]);
+
+  function resetUnreadableSave() {
+    persistence?.clear();
+    setSaveBlocked(false);
+    setSaveUnavailable(false);
+    playSound("tap");
+  }
 
   function toggleCard(id: string) {
     if (!humanCanAct) return;
@@ -207,6 +220,11 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
     playSound("tap");
   }
 
+  const saveWarning = saveBlocked
+    ? "现有存档无法安全读取，本次不会覆盖它。"
+    : saveUnavailable
+      ? "本机存档不可用，本次进度只在当前页面保留。"
+      : undefined;
   const tableMessage = aiThinking
     ? `${active.displayName}正在理牌…`
     : state.lastAction?.text ?? "等待出牌。";
@@ -241,6 +259,13 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
           <button type="button" onClick={toggleSound} aria-label={soundEnabled ? "关闭声音" : "开启声音"}>{soundEnabled ? "♪" : "×"}</button>
         </div>
       </header>
+
+      {saveWarning && !showRules && (
+        <div className="gd-save-warning" role="alert">
+          <span>{saveWarning}</span>
+          {saveBlocked && <button type="button" onClick={resetUnreadableSave}>重置旧存档并启用保存</button>}
+        </div>
+      )}
 
       <div
         className="gd-level-rail"
@@ -356,6 +381,12 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
             <p className="gd-rule-board__scope">
               暂不包含进贡还贡、木板/钢板和同花顺炸弹。本局惯例：两张相同的王可作对子；级牌大于 A、小于小王；A2345 是最小顺子。
             </p>
+            {saveWarning && (
+              <div className="gd-save-warning gd-save-warning--inline" role="alert">
+                <span>{saveWarning}</span>
+                {saveBlocked && <button type="button" onClick={resetUnreadableSave}>重置旧存档并启用保存</button>}
+              </div>
+            )}
             <div className="gd-difficulty" role="radiogroup" aria-label="对手难度">
               <small>对手难度 · 对当前及后续牌局生效</small>
               <div>

@@ -16,15 +16,21 @@ function storageKey(gameId: string): string {
   return `${SAVE_KEY_PREFIX}${gameId}`;
 }
 
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
 function isStoredGameSave(value: unknown): value is StoredGameSave {
-  if (typeof value !== "object" || value === null) return false;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
-  if (typeof record.schemaVersion !== "number" || typeof record.savedAt !== "number") return false;
+  if (!isNonNegativeSafeInteger(record.schemaVersion) || !isNonNegativeSafeInteger(record.savedAt)) {
+    return false;
+  }
 
   const snapshot = record.snapshot as Record<string, unknown> | undefined;
-  return typeof snapshot === "object" && snapshot !== null
-    && typeof snapshot.gameId === "string"
-    && typeof snapshot.revision === "number"
+  return typeof snapshot === "object" && snapshot !== null && !Array.isArray(snapshot)
+    && typeof snapshot.gameId === "string" && snapshot.gameId.length > 0
+    && isNonNegativeSafeInteger(snapshot.revision)
     && "data" in snapshot;
 }
 

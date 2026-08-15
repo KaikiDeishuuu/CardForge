@@ -13,6 +13,7 @@ import {
   updatePreferences,
   type TwentyOneRootState,
 } from "../domain/session";
+import { TWENTY_ONE_SAVE_SCHEMA_VERSION } from "../domain/persistence";
 import type { PlayerHandState, PlayingCard, TwentyOneState } from "../domain/types";
 import { PlayerHands } from "./PlayerHands";
 import { SetupLedger, TableLedger } from "./TablePanels";
@@ -150,6 +151,35 @@ describe("Twenty One setup and table controls", () => {
     expect(screen.getAllByRole("combobox")).toHaveLength(4);
     fireEvent.click(screen.getByRole("button", { name: /入座经典牌桌/ }));
     expect(onStartClassic).toHaveBeenCalledWith(STANDARD_SIX_RULES, false);
+  });
+
+  it("blocks writes and offers an explicit reset for an unreadable restored save", async () => {
+    const save = vi.fn<GamePersistenceHandle["save"]>();
+    const clear = vi.fn();
+    const persistence: GamePersistenceHandle = {
+      restored: { schemaVersion: 99, data: { future: true } },
+      save,
+      clear,
+    };
+    render(
+      <SoundProvider>
+        <TwentyOneExperience onExit={vi.fn()} persistence={persistence} />
+      </SoundProvider>,
+    );
+
+    const warning = screen.getByRole("alert");
+    expect(warning.textContent).toContain("现有存档无法安全读取，本次不会覆盖它");
+    expect(save).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "重置旧存档并启用保存" }));
+    expect(clear).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(save).toHaveBeenCalledWith(
+        TWENTY_ONE_SAVE_SCHEMA_VERSION,
+        0,
+        expect.objectContaining({ revision: 0 }),
+      );
+    });
   });
 
   it("shows an active session's locked rules as read-only values", () => {
