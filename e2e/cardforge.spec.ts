@@ -49,6 +49,12 @@ async function expectElementWithinViewport(page: Page, locator: Locator) {
 
 async function enterGame(page: Page, id: "ember-pact" | "twenty-one" | "guandan" | "dingding") {
   await page.goto(`/?game=${id}`);
+  // 定鼎开局多一步三选一选将，选完才轮到规则页的入席按钮。
+  if (id === "dingding") {
+    const draft = page.getByRole("dialog", { name: /三选一/ });
+    await expect(draft).toBeVisible();
+    await draft.getByRole("button", { name: /^选择武将/ }).first().click();
+  }
   const entryLabels = {
     "ember-pact": "开始争焰",
     "twenty-one": "入座经典牌桌",
@@ -347,6 +353,13 @@ test("掼蛋支持键盘浏览、提示与出牌", async ({ page }) => {
 test("定鼎身份局可以入席并展示四席暗局", async ({ page }) => {
   const assertNoPageErrors = collectPageErrors(page);
   await page.goto("/?game=dingding");
+
+  // 开局先三选一选将，选完才轮到规则页的「入席开局」。
+  const draft = page.getByRole("dialog", { name: /三选一/ });
+  await expect(draft).toBeVisible();
+  const heroChoices = draft.getByRole("button", { name: /^选择武将/ });
+  await expect(heroChoices).toHaveCount(3);
+  await heroChoices.first().click();
 
   const entry = page.getByRole("button", { name: /入席开局/ });
   await expect(entry).toBeVisible();

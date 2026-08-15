@@ -95,6 +95,18 @@ describe("Ding session archive", () => {
     expect(selected.activeMatch!.state.revision).toBe(1);
   });
 
+  it("closes the draft when the human confirms the pre-assigned first hero", () => {
+    // options[0] 已经预先发给人类席，chooseHero 因此返回原 state。
+    // 如果据此提前返回，选将弹层就永远不会关闭——而它正是用户看到的第一张卡。
+    const root = startDingMatchWithHeroDraft(createDefaultDingRootState(), "standard", fixedRandom);
+    const first = root.activeMatch!.heroDraft!.options[0];
+    expect(root.activeMatch!.state.players.find((player) => player.controller === "human")!.heroId).toBe(first);
+
+    const selected = chooseDingMatchHero(root, first);
+    expect(selected.activeMatch?.heroDraft).toBeUndefined();
+    expect(selected.activeMatch!.state.players.find((player) => player.controller === "human")!.heroId).toBe(first);
+  });
+
   it("does not record a loss as a win and counts the human identity independently of winner text", () => {
     const playing = createInitialState(fixedRandom);
     let root = startDingMatch(createDefaultDingRootState(), playing);

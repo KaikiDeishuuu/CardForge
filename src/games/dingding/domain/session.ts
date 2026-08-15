@@ -154,8 +154,10 @@ export function startDingMatchWithHeroDraft(
 export function chooseDingMatchHero(root: DingRootState, heroId: HeroId): DingRootState {
   const active = root.activeMatch;
   if (!active?.heroDraft || active.resultRecorded || !active.heroDraft.options.includes(heroId)) return root;
+  // options[0] 已经预先发给人类席，chooseHero 对它会原样返回 state。
+  // 因此不能用「state 没变」当作放弃条件：确认第一张候选同样是有效选择，
+  // 必须照常关闭选将弹层，否则用户点第一张卡会永远卡在弹层里。
   const state = chooseHero(active.state, "south", heroId);
-  if (state === active.state) return root;
   return {
     ...root,
     revision: root.revision + 1,
