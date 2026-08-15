@@ -5,6 +5,7 @@ import type {
   ComboType,
   GuandanAction,
   GuandanCard,
+  GuandanDifficulty,
   GuandanPlayer,
   GuandanState,
   MatchState,
@@ -265,7 +266,12 @@ export function levelsForPartnerPlace(partnerPlace: number): number {
   return 1;
 }
 
-function createDeal(match: MatchState, leadPlayerId: PlayerId, random: () => number): GuandanState {
+function createDeal(
+  match: MatchState,
+  leadPlayerId: PlayerId,
+  random: () => number,
+  difficulty: GuandanDifficulty,
+): GuandanState {
   const hands: Record<PlayerId, GuandanCard[]> = { human: [], east: [], partner: [], west: [] };
   shuffled(createDeck(), random).forEach((card, index) => {
     hands[PLAYER_ORDER[index % PLAYER_ORDER.length]].push(card);
@@ -287,6 +293,7 @@ function createDeal(match: MatchState, leadPlayerId: PlayerId, random: () => num
     consecutivePasses: 0,
     finishOrder: [],
     match,
+    difficulty,
     lastAction: dealAction,
     log: [dealAction],
   };
@@ -298,20 +305,44 @@ function getPlayerFrom(players: readonly GuandanPlayer[], id: PlayerId): Guandan
   return player;
 }
 
-export function createInitialState(random: () => number = Math.random): GuandanState {
-  return createDeal(INITIAL_MATCH, "human", random);
+export function createInitialState(
+  random: () => number = Math.random,
+  difficulty: GuandanDifficulty = "standard",
+): GuandanState {
+  return createDeal(INITIAL_MATCH, "human", random, difficulty);
 }
 
-/** 开下一局：由上一局头游先领出，级牌换成新的打级方级别。 */
+/** 开下一局：由上一局头游先领出，级牌换成新的打级方级别，难度保持不变。 */
 export function startNextDeal(state: GuandanState, random: () => number = Math.random): GuandanState {
   if (state.status !== "finished" || state.match.champion) return state;
   const lead = state.finishOrder[0] ?? "human";
-  return createDeal({ ...state.match, dealNumber: state.match.dealNumber + 1 }, lead, random);
+  return createDeal({ ...state.match, dealNumber: state.match.dealNumber + 1 }, lead, random, state.difficulty);
 }
 
-/** 重开整场比赛，级别归零。 */
-export function restartMatch(random: () => number = Math.random): GuandanState {
-  return createInitialState(random);
+/** 重开整场比赛，级别归零；可沿用当前难度。 */
+export function restartMatch(
+  random: () => number = Math.random,
+  difficulty: GuandanDifficulty = "standard",
+): GuandanState {
+  return createInitialState(random, difficulty);
+}
+
+export const GUANDAN_DIFFICULTY_NAMES: Readonly<Record<GuandanDifficulty, string>> = {
+  relaxed: "见习",
+  standard: "标准",
+  tactician: "战术",
+};
+
+/** 切换对手难度：作为一条系统记录写入牌局，因此会触发存档。 */
+export function changeDifficulty(state: GuandanState, difficulty: GuandanDifficulty): GuandanState {
+  if (state.difficulty === difficulty) return state;
+  const notice = action(
+    state.revision + 1,
+    "table",
+    "settings",
+    `对手难度调整为「${GUANDAN_DIFFICULTY_NAMES[difficulty]}」。`,
+  );
+  return appendAction({ ...state, difficulty }, notice);
 }
 
 export function getPlayError(state: GuandanState, actorId: PlayerId, cardIds: readonly string[]): string | undefined {

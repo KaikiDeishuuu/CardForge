@@ -8,6 +8,7 @@ type UnknownRecord = Record<string, unknown>;
 const SUITS = new Set(["spades", "hearts", "diamonds", "clubs", "joker"]);
 const CARD_RANKS = new Set<string>([...NUMBER_RANKS, "small-joker", "big-joker"]);
 const TEAMS = new Set<TeamId>(["vermillion", "indigo"]);
+const DIFFICULTIES = new Set(["relaxed", "standard", "tactician"]);
 
 function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null;
@@ -73,6 +74,8 @@ export function restoreGuandanState(data: unknown): GuandanState | undefined {
   if (!Array.isArray(data.players) || data.players.length !== 4 || !data.players.every(isPlayer)) return undefined;
   if (!Array.isArray(data.finishOrder) || !data.finishOrder.every((id) => typeof id === "string")) return undefined;
   if (!isMatch(data.match)) return undefined;
+  if (data.difficulty !== undefined
+    && (typeof data.difficulty !== "string" || !DIFFICULTIES.has(data.difficulty))) return undefined;
   if (!Array.isArray(data.log) || !data.log.every(isAction)) return undefined;
   if (data.lastAction !== undefined && !isAction(data.lastAction)) return undefined;
   if (data.winner !== undefined && (typeof data.winner !== "string" || !TEAMS.has(data.winner as TeamId))) return undefined;
@@ -83,5 +86,10 @@ export function restoreGuandanState(data: unknown): GuandanState | undefined {
       || !Array.isArray(data.trick.combo.cards)
       || !data.trick.combo.cards.every(isCard)) return undefined;
   }
-  return data as unknown as GuandanState;
+  return {
+    ...data,
+    difficulty: typeof data.difficulty === "string" && DIFFICULTIES.has(data.difficulty)
+      ? data.difficulty
+      : "standard",
+  } as unknown as GuandanState;
 }

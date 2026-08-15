@@ -6,6 +6,7 @@ export type CardRank = NumberRank | "small-joker" | "big-joker";
 export type PlayerId = "human" | "east" | "partner" | "west";
 export type TeamId = "vermillion" | "indigo";
 export type ComboType = "single" | "pair" | "triple" | "full-house" | "straight" | "bomb";
+export type GuandanDifficulty = "relaxed" | "standard" | "tactician";
 
 export interface GuandanCard extends CardIdentity {
   readonly suit: Suit;
@@ -38,7 +39,7 @@ export interface TrickState {
 export interface GuandanAction {
   readonly id: number;
   readonly actorId: PlayerId | "table";
-  readonly type: "deal" | "play" | "pass" | "clear" | "finish" | "settle";
+  readonly type: "deal" | "play" | "pass" | "clear" | "finish" | "settle" | "settings";
   readonly text: string;
   readonly cards?: readonly GuandanCard[];
   readonly combo?: CardCombo;
@@ -76,6 +77,7 @@ export interface GuandanState {
   readonly finishOrder: readonly PlayerId[];
   readonly winner?: TeamId;
   readonly match: MatchState;
+  readonly difficulty: GuandanDifficulty;
   readonly lastAction?: GuandanAction;
   readonly log: readonly GuandanAction[];
 }

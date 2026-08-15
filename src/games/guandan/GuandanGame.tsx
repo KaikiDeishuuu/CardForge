@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import type { GameRuntimeProps } from "../../core/games/types";
 import { useSound } from "../../shared/audio/SoundProvider";
+import { playbackDelay, usePlaybackSpeed } from "../../shared/settings/usePlaybackSpeed";
 import { useModalFocus } from "../../shared/ui/useModalFocus";
 import { GuandanCardView } from "./components/GuandanCardView";
 import { chooseAiMove } from "./domain/ai";
 import {
+  GUANDAN_DIFFICULTY_NAMES,
   NUMBER_RANKS,
   canPass,
+  changeDifficulty,
   classifyCombo,
   createInitialState,
   getPlayError,
@@ -17,7 +20,7 @@ import {
   teamName,
 } from "./domain/engine";
 import { GUANDAN_SAVE_SCHEMA_VERSION, restoreGuandanState, serializeGuandanState } from "./domain/persistence";
-import type { AiMove, GuandanPlayer, GuandanState, PlayerId } from "./domain/types";
+import type { AiMove, GuandanDifficulty, GuandanPlayer, GuandanState, PlayerId } from "./domain/types";
 import "./guandan.css";
 
 function Seat({ player, active, lastActorId }: { player: GuandanPlayer; active: boolean; lastActorId?: PlayerId }) {
@@ -42,6 +45,12 @@ function applyMove(state: GuandanState, actorId: PlayerId, move: AiMove | undefi
     : passTurn(state, actorId);
 }
 
+const DIFFICULTY_OPTIONS: ReadonlyArray<{ id: GuandanDifficulty; description: string }> = [
+  { id: "relaxed", description: "AI 偶尔保守，给你留出拆牌与练手的空间。" },
+  { id: "standard", description: "按基础牌力出牌，跟最小能压的牌并保留炸弹。" },
+  { id: "tactician", description: "保护百搭、规划收尾，只在必要时拆炸弹。" },
+];
+
 export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
   const restored = useMemo(
     () => persistence?.restored && persistence.restored.schemaVersion === GUANDAN_SAVE_SCHEMA_VERSION
@@ -56,6 +65,7 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
   const [autoPilot, setAutoPilot] = useState(false);
   const [hintText, setHintText] = useState<string>();
   const { enabled: soundEnabled, toggle: toggleSound, play: playSound } = useSound();
+  const { speed: playbackSpeed, cycle: cyclePlaybackSpeed } = usePlaybackSpeed();
 
   const human = getPlayer(state, "human");
   const active = getPlayer(state, state.activePlayerId);
@@ -84,7 +94,7 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
     const timer = window.setTimeout(() => {
       // Decided once and reused: scanning a 27-card hand for legal combos is the
       // most expensive thing this table does per turn.
-      const move = chooseAiMove(state, expectedActor);
+      const move = chooseAiMove(state, expectedActor, state.difficulty);
       setState((current) => {
         if (current.revision !== expectedRevision || current.activePlayerId !== expectedActor) return current;
         return applyMove(current, expectedActor, move);
@@ -92,9 +102,9 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
       playSound(move?.kind === "play" ? "card" : "tap");
       setSelectedIds([]);
       setHintText(undefined);
-    }, 460);
+    }, playbackDelay(460, playbackSpeed));
     return () => window.clearTimeout(timer);
-  }, [aiThinking, playSound, state]);
+  }, [aiThinking, playSound, playbackSpeed, state]);
 
   useEffect(() => {
     if (state.status === "finished") playSound(state.winner === human.team ? "win" : "tap");
@@ -140,7 +150,7 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
 
   function suggest() {
     if (!humanCanAct) return;
-    const suggestion = chooseAiMove(state, "human");
+    const suggestion = chooseAiMove(state, "human", "tactician");
     if (suggestion?.kind === "play") {
       const cards = human.hand.filter((card) => suggestion.cardIds.includes(card.id));
       setSelectedIds(suggestion.cardIds);
@@ -186,10 +196,15 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
   }
 
   function restart() {
-    setState(createInitialState());
+    setState(createInitialState(Math.random, state.difficulty));
     setAutoPilot(false);
     clearTurnUi();
     playSound("card");
+  }
+
+  function chooseDifficulty(difficulty: GuandanDifficulty) {
+    setState((current) => changeDifficulty(current, difficulty));
+    playSound("tap");
   }
 
   const tableMessage = aiThinking
@@ -222,6 +237,7 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
         <div className="guandan-tools">
           <button type="button" onClick={() => setShowRules(true)} aria-label="查看规则">?</button>
           <button type="button" onClick={() => setShowLog((value) => !value)} aria-label="查看牌局记录">≡</button>
+          <button type="button" onClick={cyclePlaybackSpeed} aria-label={`AI 速度 ${playbackSpeed}×`} title={`AI 速度 ${playbackSpeed}×`}>{playbackSpeed}×</button>
           <button type="button" onClick={toggleSound} aria-label={soundEnabled ? "关闭声音" : "开启声音"}>{soundEnabled ? "♪" : "×"}</button>
         </div>
       </header>
@@ -340,6 +356,24 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
             <p className="gd-rule-board__scope">
               暂不包含进贡还贡、木板/钢板和同花顺炸弹。本局惯例：两张相同的王可作对子；级牌大于 A、小于小王；A2345 是最小顺子。
             </p>
+            <div className="gd-difficulty" role="radiogroup" aria-label="对手难度">
+              <small>对手难度 · 对当前及后续牌局生效</small>
+              <div>
+                {DIFFICULTY_OPTIONS.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={state.difficulty === option.id}
+                    className={state.difficulty === option.id ? "is-selected" : ""}
+                    onClick={() => chooseDifficulty(option.id)}
+                  >
+                    <strong>{GUANDAN_DIFFICULTY_NAMES[option.id]}</strong>
+                    <span>{option.description}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
             <button type="button" className="gd-rule-board__enter" onClick={() => { setShowRules(false); playSound("card"); }}>入席开牌 <span>→</span></button>
           </div>
         </div>

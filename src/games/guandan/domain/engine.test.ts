@@ -5,6 +5,7 @@ import {
   PLAYER_ORDER,
   advanceLevel,
   canBeat,
+  changeDifficulty,
   classifyCombo,
   createDeck,
   createInitialState,
@@ -43,6 +44,7 @@ function state(players: readonly GuandanPlayer[], overrides: Partial<GuandanStat
     consecutivePasses: 0,
     finishOrder: [],
     match: INITIAL_MATCH,
+    difficulty: "standard",
     log: [],
     ...overrides,
   };
@@ -238,6 +240,55 @@ describe("Guandan engine", () => {
     });
 
     expect(chooseAiMove(game, "partner")).toEqual({ kind: "pass" });
+  });
+
+  it("tactician difficulty passes instead of wasting a bomb when no opponent is close to finishing", () => {
+    const opening = classifyCombo([card("8")], "2")!;
+    const bomb = [card("3"), card("3", "clubs"), card("3", "diamonds"), card("3", "hearts")];
+    const game = state([
+      player("human", [...bomb, card("4"), card("5")]),
+      player("east", [card("10"), card("J"), card("Q"), card("K")]),
+      player("partner", [card("6"), card("7"), card("9"), card("10")]),
+      player("west", [card("J"), card("Q"), card("K"), card("A")]),
+    ], {
+      activePlayerId: "human",
+      trick: { actorId: "west", combo: opening },
+    });
+
+    const standard = chooseAiMove(game, "human", "standard");
+    if (standard?.kind !== "play") throw new Error("expected a bomb play");
+    expect(standard.cardIds).toHaveLength(4);
+    expect(chooseAiMove(game, "human", "tactician")).toEqual({ kind: "pass" });
+  });
+
+  it("tactician difficulty breaks a bomb when an opponent is about to finish", () => {
+    const opening = classifyCombo([card("8")], "2")!;
+    const bomb = [card("3"), card("3", "clubs"), card("3", "diamonds"), card("3", "hearts")];
+    const game = state([
+      player("human", [...bomb, card("4"), card("5")]),
+      player("east", [card("10"), card("J"), card("Q")]),
+      player("partner", [card("6"), card("7"), card("9")]),
+      player("west", [card("K")]),
+    ], {
+      activePlayerId: "human",
+      trick: { actorId: "west", combo: opening },
+    });
+
+    const move = chooseAiMove(game, "human", "tactician");
+    if (move?.kind !== "play") throw new Error("expected a bomb play");
+    expect(move.cardIds).toHaveLength(4);
+  });
+
+  it("records difficulty changes and carries them into the next deal", () => {
+    const initial = createInitialState(() => 0.37, "relaxed");
+    expect(initial.difficulty).toBe("relaxed");
+    const changed = changeDifficulty(initial, "tactician");
+    expect(changed.difficulty).toBe("tactician");
+    expect(changed.lastAction).toMatchObject({ type: "settings", text: "对手难度调整为「战术」。" });
+
+    const finished = playOutDeal(["human", "partner"]);
+    const withDifficulty = { ...finished, difficulty: "relaxed" as const };
+    expect(startNextDeal(withDifficulty, () => 0.4).difficulty).toBe("relaxed");
   });
 
   it("awards levels by the head player's partner place, not by who empties first", () => {
