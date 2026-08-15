@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties, type Dispatch, type SetStateAction } from "react";
 import type { GameRuntimeProps } from "../../../core/games/types";
 import { useSound } from "../../../shared/audio/SoundProvider";
+import { playbackDelay, usePlaybackSpeed } from "../../../shared/settings/usePlaybackSpeed";
 import { useModalFocus } from "../../../shared/ui/useModalFocus";
 import {
   createInitialState,
@@ -21,6 +22,7 @@ import {
   createDefaultRootState,
   finishClassicSession,
   markHintUsed,
+  rememberBet,
   resetArchive,
   retryActiveSession,
   returnToModeSelect,
@@ -65,6 +67,46 @@ function phaseLabel(state: TwentyOneState): string {
   }
 }
 
+function decisionUnavailableReason(
+  state: TwentyOneState,
+  action: "hit" | "stand" | "double" | "split" | "surrender",
+): string | undefined {
+  const hand = getActiveHand(state);
+  if (state.phase !== "player-turn") return "现在不是你的行动阶段";
+  if (!hand || hand.status !== "playing") {
+    if (hand?.status === "busted") return "本手已经爆牌";
+    if (hand?.status === "surrendered") return "本手已经投降";
+    if (hand?.status === "stood") return "本手已经停牌";
+    return "本手已经完成";
+  }
+
+  if (action === "hit" && hand.splitAces && !state.rules.hitSplitAces) {
+    return "本桌房规禁止分 A 后继续要牌";
+  }
+  if (action === "double") {
+    if (hand.cards.length !== 2) return "只有最初两张牌时才能加倍";
+    if (hand.doubled) return "本手已经加倍";
+    if (state.chips < hand.wager) return "筹码不足，无法再托一等额注";
+    if (hand.fromSplit && !state.rules.doubleAfterSplit) return "本桌房规禁止分牌后加倍";
+    if (hand.splitAces && !state.rules.hitSplitAces) return "本桌房规禁止分 A 后加倍";
+  }
+  if (action === "split") {
+    if (state.hands.length >= state.rules.maxPlayerHands) return "已经达到分牌手数上限";
+    if (state.chips < hand.wager) return "筹码不足，无法追加等额注";
+    if (hand.cards.length !== 2) return "只有两张点值相同的牌才能分牌";
+    const values = hand.cards.map((card) => card.rank === "A" ? 11 : ["J", "Q", "K"].includes(card.rank) ? 10 : Number(card.rank));
+    if (values[0] !== values[1]) return "两张牌点值不同，不能分牌";
+    if (hand.cards[0].rank === "A" && hand.fromSplit && !state.rules.resplitAces) return "本桌房规禁止再次分 A";
+  }
+  if (action === "surrender") {
+    if (!state.rules.allowLateSurrender) return "本桌房规未开启迟投降";
+    if (state.hands.length > 1 || hand.fromSplit) return "分牌或多手局面不能迟投降";
+    if (hand.doubled) return "加倍后不能迟投降";
+    if (hand.cards.length !== 2) return "只有最初两张牌时才能迟投降";
+  }
+  return undefined;
+}
+
 interface ActiveTableProps {
   root: TwentyOneRootState;
   setRoot: Dispatch<SetStateAction<TwentyOneRootState>>;
@@ -79,6 +121,7 @@ function ActiveTable({ root, setRoot, onExit, restoredNotice }: ActiveTableProps
   const [ledgerTab, setLedgerTab] = useState<LedgerTab>("rules");
   const [hint, setHint] = useState<(StrategyHint & { revision: number }) | undefined>();
   const { enabled: soundEnabled, toggle: toggleSound, play: playSound } = useSound();
+  const { speed: playbackSpeed, cycle: cyclePlaybackSpeed } = usePlaybackSpeed();
   const activeHand = getActiveHand(state) ?? state.hands.at(-1);
   const playerValue = evaluateHand(activeHand?.cards ?? []);
   const dealerValue = evaluateHand(state.dealerHand);
@@ -88,6 +131,8 @@ function ActiveTable({ root, setRoot, onExit, restoredNotice }: ActiveTableProps
   const dealerThinking = state.phase === "dealer-turn" && !ledgerOpen && session.status === "playing";
   const totalOnTable = state.hands.reduce((sum, hand) => sum + hand.wager, 0) + state.insurance.wager;
   const challenge = session.mode === "challenge" && session.challengeId ? CHALLENGES[session.challengeId] : undefined;
+  const lastBet = root.preferences.lastBet ?? 25;
+  const repeatBetAvailable = state.phase === "betting" && legal.bets.includes(lastBet);
 
   useEffect(() => {
     if (!dealerThinking) return;
@@ -103,9 +148,9 @@ function ActiveTable({ root, setRoot, onExit, restoredNotice }: ActiveTableProps
         return updateActiveTable(current, transition(currentSession.table, { type: "dealer-step" }));
       });
       if (preview.phase !== "settled") playSound("card");
-    }, 680);
+    }, playbackDelay(680, playbackSpeed));
     return () => window.clearTimeout(timer);
-  }, [dealerThinking, playSound, setRoot, state]);
+  }, [dealerThinking, playSound, playbackSpeed, setRoot, state]);
 
   useEffect(() => {
     if (state.phase === "settled") playSound(state.settlement?.outcome === "player" ? "win" : "tap");
@@ -126,7 +171,8 @@ function ActiveTable({ root, setRoot, onExit, restoredNotice }: ActiveTableProps
     setRoot((current) => {
       const currentSession = current.activeSession;
       if (!currentSession || currentSession.status !== "playing") return current;
-      return updateActiveTable(current, transition(currentSession.table, action));
+      const next = updateActiveTable(current, transition(currentSession.table, action));
+      return action.type === "place-bet" ? rememberBet(next, action.amount) : next;
     });
     playSound(cue);
   }
@@ -166,6 +212,7 @@ function ActiveTable({ root, setRoot, onExit, restoredNotice }: ActiveTableProps
         </div>
         <div className="twenty-one-tools">
           <button type="button" onClick={() => openLedger("rules")} aria-label="打开牌桌册">☷</button>
+          <button type="button" onClick={cyclePlaybackSpeed} aria-label={`AI 速度 ${playbackSpeed}×`} title={`AI 速度 ${playbackSpeed}×`}>{playbackSpeed}×</button>
           <button type="button" onClick={toggleSound} aria-label={soundEnabled ? "关闭声音" : "开启声音"}>{soundEnabled ? "♪" : "×"}</button>
         </div>
       </header>
@@ -222,6 +269,16 @@ function ActiveTable({ root, setRoot, onExit, restoredNotice }: ActiveTableProps
         {state.phase === "betting" ? (
           <div className="bet-actions">
             {legal.bets.map((amount) => <button key={amount} type="button" className="bet-chip" onClick={() => applyAction({ type: "place-bet", amount }, "card")} aria-label={`压 ${amount} 枚筹码`}>{amount}</button>)}
+            {repeatBetAvailable && (
+              <button
+                type="button"
+                className="bet-chip bet-chip--repeat"
+                onClick={() => applyAction({ type: "place-bet", amount: lastBet }, "card")}
+                aria-label={`重复上一注 ${lastBet}`}
+              >
+                重复 {lastBet}
+              </button>
+            )}
           </div>
         ) : state.phase === "insurance" ? (
           <div className="insurance-actions">
@@ -232,13 +289,13 @@ function ActiveTable({ root, setRoot, onExit, restoredNotice }: ActiveTableProps
         ) : (
           <div className="decision-actions decision-actions--expanded">
             <div className="decision-actions__primary">
-              <button type="button" className={actionClass("stand", "decision-button decision-button--stand")} onClick={() => applyAction({ type: "stand" })} disabled={!legal.stand}><span>停牌</span><small>STAND</small></button>
-              <button type="button" className={actionClass("hit", "decision-button decision-button--hit")} onClick={() => applyAction({ type: "hit" }, "card")} disabled={!legal.hit}><span>要牌</span><small>HIT</small></button>
+              <button type="button" className={actionClass("stand", "decision-button decision-button--stand")} onClick={() => applyAction({ type: "stand" })} disabled={!legal.stand} title={legal.stand ? undefined : decisionUnavailableReason(state, "stand")}><span>停牌</span><small>STAND</small></button>
+              <button type="button" className={actionClass("hit", "decision-button decision-button--hit")} onClick={() => applyAction({ type: "hit" }, "card")} disabled={!legal.hit} title={legal.hit ? undefined : decisionUnavailableReason(state, "hit")}><span>要牌</span><small>HIT</small></button>
             </div>
             <div className={`decision-actions__secondary ${root.preferences.assistEnabled ? "has-hint" : ""}`}>
-              <button type="button" className={actionClass("double", "tw-secondary-action")} onClick={() => applyAction({ type: "double" }, "hit")} disabled={!legal.double}>加倍</button>
-              <button type="button" className={actionClass("split", "tw-secondary-action")} onClick={() => applyAction({ type: "split" }, "card")} disabled={!legal.split}>分牌</button>
-              <button type="button" className={actionClass("surrender", "tw-secondary-action")} onClick={() => applyAction({ type: "surrender" })} disabled={!legal.surrender}>投降</button>
+              <button type="button" className={actionClass("double", "tw-secondary-action")} onClick={() => applyAction({ type: "double" }, "hit")} disabled={!legal.double} title={legal.double ? undefined : decisionUnavailableReason(state, "double")}>加倍</button>
+              <button type="button" className={actionClass("split", "tw-secondary-action")} onClick={() => applyAction({ type: "split" }, "card")} disabled={!legal.split} title={legal.split ? undefined : decisionUnavailableReason(state, "split")}>分牌</button>
+              <button type="button" className={actionClass("surrender", "tw-secondary-action")} onClick={() => applyAction({ type: "surrender" })} disabled={!legal.surrender} title={legal.surrender ? undefined : decisionUnavailableReason(state, "surrender")}>投降</button>
               {root.preferences.assistEnabled && <button type="button" className="tw-secondary-action" onClick={requestHint} disabled={state.phase !== "player-turn"}>提示</button>}
             </div>
           </div>

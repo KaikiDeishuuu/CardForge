@@ -8,6 +8,8 @@ export type SessionEndReason = "left-table" | "bankrupt" | "challenge-cleared" |
 export interface TwentyOnePreferences {
   readonly rules: TwentyOneRules;
   readonly assistEnabled: boolean;
+  /** 上一次下的注，用于牌桌的“重复上一注”快捷按钮。 */
+  readonly lastBet?: number;
 }
 
 export interface TwentyOneStats {
@@ -183,7 +185,7 @@ export function createEmptyChallengeRecords(): ChallengeRecords {
 export function createDefaultRootState(): TwentyOneRootState {
   return {
     revision: 0,
-    preferences: { rules: STANDARD_SIX_RULES, assistEnabled: false },
+    preferences: { rules: STANDARD_SIX_RULES, assistEnabled: false, lastBet: 25 },
     lifetimeStats: createEmptyStats(CLASSIC_STARTING_CHIPS),
     challengeRecords: createEmptyChallengeRecords(),
   };
@@ -214,6 +216,16 @@ export function updatePreferences(
 ): TwentyOneRootState {
   if (root.activeSession) return root;
   return { ...root, revision: root.revision + 1, preferences };
+}
+
+/** 记录最近一次下注；对局进行中也可调用，不影响牌桌状态。 */
+export function rememberBet(root: TwentyOneRootState, lastBet: number): TwentyOneRootState {
+  if (root.preferences.lastBet === lastBet) return root;
+  return {
+    ...root,
+    revision: root.revision + 1,
+    preferences: { ...root.preferences, lastBet },
+  };
 }
 
 export function setAssistEnabled(root: TwentyOneRootState, assistEnabled: boolean): TwentyOneRootState {

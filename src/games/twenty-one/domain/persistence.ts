@@ -157,8 +157,7 @@ function isSettlement(value: unknown): value is TwentyOneSettlement {
   return value.outcome === expectedOutcome;
 }
 
-function isTableState(value: unknown): value is TwentyOneState {
-  if (!isRecord(value)
+function isTableState(value: unknown): value is TwentyOneState {  if (!isRecord(value)
     || !isNonNegativeInteger(value.revision)
     || typeof value.phase !== "string" || !PHASES.has(value.phase)
     || !isRules(value.rules)
@@ -277,12 +276,19 @@ function isActiveSession(value: unknown): value is ActiveTwentyOneSession {
   return true;
 }
 
+const LEGAL_BET_AMOUNTS = new Set([10, 25, 50, 100]);
+
+function isLastBetPreference(value: unknown): boolean {
+  return value === undefined || (isNonNegativeNumber(value) && LEGAL_BET_AMOUNTS.has(value));
+}
+
 function restoreV2(data: unknown): TwentyOneRootState | undefined {
   if (!isRecord(data)
     || !isNonNegativeInteger(data.revision)
     || !isRecord(data.preferences)
     || !isRules(data.preferences.rules)
     || typeof data.preferences.assistEnabled !== "boolean"
+    || !isLastBetPreference(data.preferences.lastBet)
     || !isStats(data.lifetimeStats)
     || !isRecord(data.challengeRecords)
     || !isChallengeRecord(data.challengeRecords.warmup)

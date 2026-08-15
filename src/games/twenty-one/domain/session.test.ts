@@ -10,6 +10,7 @@ import {
   getChallengeVerdict,
   identifyRulesPreset,
   markHintUsed,
+  rememberBet,
   resetArchive,
   retryActiveSession,
   startChallengeSession,
@@ -164,5 +165,13 @@ describe("Twenty One session model", () => {
     expect(getChallengeVerdict("endurance", 29, 900)).toMatchObject({ finished: false });
     expect(getChallengeVerdict("endurance", 30, 499)).toMatchObject({ finished: true, cleared: false, reason: "round-limit" });
     expect(getChallengeVerdict("warmup", 2, 0)).toMatchObject({ finished: true, cleared: false, reason: "bankrupt" });
+  });
+
+  it("remembers the last bet even while a session is active", () => {
+    const root = startClassicSession(createDefaultRootState(), table());
+    const remembered = rememberBet(root, 50);
+    expect(remembered.preferences.lastBet).toBe(50);
+    expect(remembered.activeSession?.table.revision).toBe(root.activeSession?.table.revision);
+    expect(rememberBet(remembered, 50)).toBe(remembered);
   });
 });

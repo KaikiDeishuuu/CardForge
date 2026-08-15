@@ -11,7 +11,7 @@ import {
 import type { TwentyOneRules } from "../domain/types";
 
 type SetupChoice = "classic" | ChallengeId;
-export type LedgerTab = "rules" | "house" | "archive";
+export type LedgerTab = "rules" | "house" | "archive" | "history";
 
 const PRESET_COPY: Readonly<Record<Exclude<RulesPresetId, "custom">, { name: string; note: string }>> = {
   "standard-six": { name: "六副标准", note: "S17 · 3:2 · 最多四手" },
@@ -136,11 +136,18 @@ export function SetupLedger({
         <button type="button" role="radio" aria-checked={choice === "classic"} className={choice === "classic" ? "is-selected" : ""} onClick={() => setChoice("classic")}>
           <small>CLASSIC</small><strong>经典牌桌</strong><span>500 筹码 · 不限手数</span>
         </button>
-        {(Object.values(CHALLENGES)).map((entry) => (
-          <button key={entry.id} type="button" role="radio" aria-checked={choice === entry.id} className={choice === entry.id ? "is-selected" : ""} onClick={() => setChoice(entry.id)}>
-            <small>{entry.eyebrow}</small><strong>{entry.name}</strong><span>{entry.description}</span>
-          </button>
-        ))}
+        {(Object.values(CHALLENGES)).map((entry) => {
+          const record = root.challengeRecords[entry.id];
+          return (
+            <button key={entry.id} type="button" role="radio" aria-checked={choice === entry.id} className={choice === entry.id ? "is-selected" : ""} onClick={() => setChoice(entry.id)}>
+              <small>{entry.eyebrow}</small><strong>{entry.name}</strong><span>{entry.description}</span>
+              <em className="tw-challenge-record">
+                无辅助 {record.unassisted.clears}/{record.unassisted.runs} · 辅助 {record.assisted.clears}/{record.assisted.runs}
+                {record.unassisted.bestFinalChips !== undefined && <i>最佳 {record.unassisted.bestFinalChips}</i>}
+              </em>
+            </button>
+          );
+        })}
       </div>
 
       <section className="tw-setup-detail">
@@ -210,9 +217,9 @@ export function TableLedger({
       <small>TABLE LEDGER · 002</small>
       <h2 id="twenty-one-ledger-title">牌桌册</h2>
       <div className="tw-ledger-tabs" role="tablist" aria-label="牌桌册栏目">
-        {(["rules", "house", "archive"] as const).map((id) => (
+        {(["rules", "house", "archive", "history"] as const).map((id) => (
           <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => onTabChange(id)}>
-            {id === "rules" ? "规则" : id === "house" ? "房规" : "档案"}
+            {id === "rules" ? "规则" : id === "house" ? "房规" : id === "archive" ? "档案" : "记录"}
           </button>
         ))}
       </div>
@@ -273,6 +280,20 @@ export function TableLedger({
           </details>
           <p className="tw-readonly-note">清空档案会影响长期记录，请先结束或放弃当前会话，再在模式选择页操作。</p>
           <button type="button" className="tw-ledger-danger" disabled>清空本机统计</button>
+        </section>
+      )}
+
+      {tab === "history" && (
+        <section className="tw-ledger-panel" role="tabpanel">
+          <p>按时间倒序的本手记录；最近 20 条会随存档保留。</p>
+          <ol className="tw-history-list">
+            {[...session.table.log].reverse().map((event) => (
+              <li key={event.id}>
+                <small>{event.actor === "player" ? "你" : event.actor === "dealer" ? "庄家" : "牌桌"} · #{event.id}</small>
+                <span>{event.text}</span>
+              </li>
+            ))}
+          </ol>
         </section>
       )}
     </article>

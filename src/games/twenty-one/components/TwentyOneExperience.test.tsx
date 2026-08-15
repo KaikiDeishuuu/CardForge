@@ -8,6 +8,7 @@ import {
   SINGLE_DECK_RULES,
   STANDARD_SIX_RULES,
   createDefaultRootState,
+  rememberBet,
   startClassicSession,
   updatePreferences,
   type TwentyOneRootState,
@@ -177,6 +178,31 @@ describe("Twenty One setup and table controls", () => {
     fireEvent.click(betweenHandsButton);
     expect(onFinishClassic).toHaveBeenCalledTimes(1);
   });
+
+  it("renders the hand history tab in reverse order", () => {
+    const root = classicRoot(activeTable({
+      log: [
+        { id: 1, actor: "table", type: "deal", text: "牌靴已洗好。" },
+        { id: 2, actor: "player", type: "bet", text: "你压下 25 枚筹码。" },
+      ],
+    }));
+    render(
+      <TableLedger
+        root={root}
+        tab="history"
+        onTabChange={vi.fn()}
+        onClose={vi.fn()}
+        onAssistChange={vi.fn()}
+        onFinishClassic={vi.fn()}
+        onAbandonChallenge={vi.fn()}
+      />,
+    );
+
+    const panel = screen.getByRole("tabpanel");
+    const entries = within(panel).getAllByRole("listitem");
+    expect(entries[0].textContent).toContain("你压下 25 枚筹码。");
+    expect(entries[1].textContent).toContain("牌靴已洗好。");
+  });
 });
 
 describe("Twenty One player presentation and assistance", () => {
@@ -220,5 +246,21 @@ describe("Twenty One player presentation and assistance", () => {
     expect(persisted.activeSession?.table.revision).toBe(table.revision);
     expect(persisted.activeSession?.table.chips).toBe(table.chips);
     expect(persisted.activeSession?.assisted).toBe(true);
+  });
+
+  it("offers a repeat-bet shortcut and keeps the remembered amount after betting", async () => {
+    const deck = Array.from({ length: 320 }, (_, index) => card("2", `repeat-deck-${index}`, "clubs"));
+    const defaultView = renderExperience(classicRoot(bettingTable({ deck })));
+    expect(screen.getByRole("button", { name: "重复上一注 25" })).toBeTruthy();
+    defaultView.unmount();
+
+    const { save } = renderExperience(rememberBet(classicRoot(bettingTable({ deck })), 50));
+    fireEvent.click(screen.getByRole("button", { name: "重复上一注 50" }));
+
+    await waitFor(() => {
+      const persisted = save.mock.calls.at(-1)?.[2] as TwentyOneRootState;
+      expect(persisted.preferences.lastBet).toBe(50);
+      expect(persisted.activeSession?.table.phase).toBe("player-turn");
+    });
   });
 });

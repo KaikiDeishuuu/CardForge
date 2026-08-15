@@ -30,7 +30,7 @@
   min-height: 70px;
   padding: max(10px, env(safe-area-inset-top)) max(18px, env(safe-area-inset-right)) 10px max(18px, env(safe-area-inset-left));
   display: grid;
-  grid-template-columns: 74px 1fr 74px;
+  grid-template-columns: 74px 1fr auto;
   align-items: center;
   border-bottom: 1px solid var(--tw-line);
   background: rgba(10, 21, 35, 0.76);
@@ -611,6 +611,20 @@
   cursor: default;
 }
 
+.bet-chip--repeat {
+  width: auto;
+  padding-inline: 18px;
+  aspect-ratio: auto;
+  color: #eadfc8;
+  background: transparent;
+  border: 1px solid rgba(196, 154, 81, 0.7);
+  border-radius: 999px;
+  font-family: var(--utility);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
 .chip-stack {
   position: absolute;
   right: clamp(0px, 4vw, 32px);
@@ -932,7 +946,7 @@
 @media (max-width: 640px) {
   .twenty-one-topbar {
     min-height: 62px;
-    grid-template-columns: 54px 1fr 66px;
+    grid-template-columns: 54px 1fr auto;
   }
 
   .twenty-one-title strong { font-size: 19px; }
@@ -1379,6 +1393,18 @@
 .tw-mode-grid button span { margin-top: 5px; color: #6c7776; font-size: 10px; line-height: 1.45; }
 .tw-mode-grid button.is-selected span { color: #c3d0cb; }
 
+.tw-mode-grid button .tw-challenge-record {
+  margin-top: 7px;
+  color: #9a763f;
+  font-family: var(--utility);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.tw-mode-grid button.is-selected .tw-challenge-record { color: #d3b16e; }
+.tw-challenge-record i { margin-left: 6px; font-style: normal; opacity: 0.78; }
+
 .tw-setup-detail {
   margin: 22px 0;
   padding-top: 18px;
@@ -1542,7 +1568,7 @@
 .tw-ledger-tabs {
   margin: 18px 0;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   border-bottom: 1px solid rgba(32, 55, 62, 0.18);
 }
 
@@ -1581,6 +1607,26 @@
 
 .tw-ledger-panel li b { color: #a37a3e; }
 .tw-ledger-panel li strong { color: #263e44; }
+
+.tw-history-list {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.tw-history-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.tw-history-list li small {
+  color: #a37a3e;
+  font-family: var(--utility);
+  font-size: 8px;
+  letter-spacing: 0.08em;
+}
+
+.tw-history-list li span { font-size: 11px; }
 
 .tw-readonly-note {
   padding: 9px 11px;

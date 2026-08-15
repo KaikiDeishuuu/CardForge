@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { STANDARD_SIX_RULES, createDefaultRootState, startClassicSession } from "./session";
+import { STANDARD_SIX_RULES, createDefaultRootState, rememberBet, startClassicSession } from "./session";
 import {
   TWENTY_ONE_SAVE_SCHEMA_VERSION,
   restoreTwentyOneRootState,
@@ -65,6 +65,21 @@ describe("Twenty One persistence", () => {
       JSON.parse(JSON.stringify(serializeTwentyOneRootState(root))),
     );
     expect(restored).toEqual(root);
+  });
+
+  it("round-trips the remembered last bet and still accepts saves without one", () => {
+    const root = rememberBet(startClassicSession(createDefaultRootState(), table()), 50);
+    const restored = restoreTwentyOneRootState(
+      TWENTY_ONE_SAVE_SCHEMA_VERSION,
+      JSON.parse(JSON.stringify(serializeTwentyOneRootState(root))),
+    );
+    expect(restored?.preferences.lastBet).toBe(50);
+
+    const data = JSON.parse(JSON.stringify(serializeTwentyOneRootState(root))) as Record<string, unknown>;
+    const preferences = data.preferences as Record<string, unknown>;
+    delete preferences.lastBet;
+    const legacyShape = restoreTwentyOneRootState(TWENTY_ONE_SAVE_SCHEMA_VERSION, data);
+    expect(legacyShape?.preferences.lastBet).toBeUndefined();
   });
 
   it("migrates a v1 hand into a legacy classic session without inventing statistics", () => {
