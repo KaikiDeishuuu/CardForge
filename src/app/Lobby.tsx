@@ -1,5 +1,6 @@
-import type { CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import type { GameRegistration } from "../core/games/types";
+import { loadGameSave, type StoredGameSave } from "../shared/storage/GameSaveStore";
 
 interface LobbyProps {
   games: readonly GameRegistration[];
@@ -8,17 +9,59 @@ interface LobbyProps {
   onLaunch: (id: string) => void;
 }
 
+interface LobbySaveSummary {
+  readonly savedAt: number;
+  readonly revision: number;
+}
+
 function isLaunchable(game: GameRegistration): boolean {
   return game.manifest.availability === "playable" && Boolean(game.load);
 }
 
+function readSaveSummaries(games: readonly GameRegistration[]): ReadonlyMap<string, LobbySaveSummary> {
+  const summaries = new Map<string, LobbySaveSummary>();
+  for (const game of games) {
+    if (!isLaunchable(game)) continue;
+    const saved: StoredGameSave | undefined = loadGameSave(game.manifest.id);
+    if (saved) summaries.set(game.manifest.id, { savedAt: saved.savedAt, revision: saved.snapshot.revision });
+  }
+  return summaries;
+}
+
+function formatSavedAgo(savedAt: number, now = Date.now()): string {
+  const elapsedMinutes = Math.max(0, Math.floor((now - savedAt) / 60_000));
+  if (elapsedMinutes < 1) return "刚刚";
+  if (elapsedMinutes < 60) return `${elapsedMinutes} 分钟前`;
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours} 小时前`;
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  return `${elapsedDays} 天前`;
+}
+
 export function Lobby({ games, soundEnabled, onToggleSound, onLaunch }: LobbyProps) {
   const launchableCount = games.filter(isLaunchable).length;
+  const [savedGames, setSavedGames] = useState(() => readSaveSummaries(games));
+
+  useEffect(() => {
+    function handleStorage(event: StorageEvent) {
+      if (!event.key?.startsWith("cardforge.save.")) return;
+      setSavedGames(readSaveSummaries(games));
+    }
+
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, [games]);
+
   const featured = games.find((game) => game.manifest.featured && isLaunchable(game))
     ?? games.find(isLaunchable);
   const shelfGames = featured
     ? games.filter((game) => game.manifest.id !== featured.manifest.id)
     : games;
+  const continueGames = [...savedGames.entries()]
+    .map(([gameId, summary]) => ({ game: games.find((entry) => entry.manifest.id === gameId), summary }))
+    .filter((entry): entry is { game: GameRegistration; summary: LobbySaveSummary } => Boolean(entry.game && isLaunchable(entry.game)))
+    .sort((left, right) => right.summary.savedAt - left.summary.savedAt)
+    .slice(0, 3);
   const featuredCode = featured
     ? `CF · ${String(games.indexOf(featured) + 1).padStart(3, "0")}`
     : "";
@@ -76,6 +119,38 @@ export function Lobby({ games, soundEnabled, onToggleSound, onLaunch }: LobbyPro
           </button>
         )}
       </section>
+
+      {continueGames.length > 0 && (
+        <section className="continue-strip" aria-labelledby="continue-title">
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow"><span /> 断点续玩</p>
+              <h2 id="continue-title">牌桌还亮着</h2>
+            </div>
+            <p>平台只读取存档时间，不解读任何游戏内容。</p>
+          </div>
+          <div className="continue-grid">
+            {continueGames.map(({ game, summary }) => (
+              <button
+                type="button"
+                className="continue-game"
+                key={game.manifest.id}
+                style={{ "--game-accent": game.manifest.accent } as CSSProperties}
+                onClick={() => onLaunch(game.manifest.id)}
+                aria-label={`继续${game.manifest.name}，上次更新${formatSavedAgo(summary.savedAt)}`}
+              >
+                <span className="continue-game__mark" aria-hidden="true">{game.manifest.mark ?? "CF"}</span>
+                <span className="continue-game__copy">
+                  <small>{game.manifest.genre}</small>
+                  <strong>{game.manifest.name}</strong>
+                  <span>上次更新 {formatSavedAgo(summary.savedAt)} · 第 {summary.revision} 次变化</span>
+                </span>
+                <b>续玩 <i aria-hidden="true">→</i></b>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="game-shelf" aria-labelledby="shelf-title">
         <div className="section-heading">

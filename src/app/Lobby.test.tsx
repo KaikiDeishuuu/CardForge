@@ -1,8 +1,9 @@
 /* @vitest-environment jsdom */
 
-import { cleanup, render } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { GameManifest, GameRegistration } from "../core/games/types";
+import { saveGameSave } from "../shared/storage/GameSaveStore";
 import { Lobby } from "./Lobby";
 
 function registration(id: string, manifest: Partial<GameManifest> = {}): GameRegistration {
@@ -24,13 +25,20 @@ function registration(id: string, manifest: Partial<GameManifest> = {}): GameReg
   };
 }
 
-function renderLobby(games: readonly GameRegistration[]) {
+function renderLobby(games: readonly GameRegistration[], onLaunch = vi.fn()) {
   return render(
-    <Lobby games={games} soundEnabled onToggleSound={vi.fn()} onLaunch={vi.fn()} />,
+    <Lobby games={games} soundEnabled onToggleSound={vi.fn()} onLaunch={onLaunch} />,
   );
 }
 
-afterEach(cleanup);
+beforeEach(() => {
+  window.localStorage.clear();
+});
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 describe("Lobby", () => {
   it("features the manifest that asks for it rather than a known game id", () => {
@@ -80,5 +88,41 @@ describe("Lobby", () => {
     const { container } = renderLobby([]);
     expect(container.querySelector(".featured-game")).toBeNull();
     expect(container.querySelector(".lobby")).not.toBeNull();
+  });
+
+  it("surfaces playable saves as a continue strip ordered by recency", () => {
+    vi.spyOn(Date, "now").mockReturnValueOnce(1_000).mockReturnValueOnce(2_000);
+    saveGameSave("first-playable", 1, 4, { ok: true });
+    saveGameSave("second-playable", 1, 12, { ok: true });
+    const { container } = renderLobby([
+      registration("planned-table", { availability: "planned" }),
+      registration("first-playable"),
+      registration("second-playable"),
+    ]);
+
+    const entries = [...container.querySelectorAll<HTMLButtonElement>(".continue-game")];
+    expect(entries).toHaveLength(2);
+    expect(entries[0].getAttribute("aria-label")).toContain("second-playable 牌桌");
+    expect(entries[1].getAttribute("aria-label")).toContain("first-playable 牌桌");
+    expect(entries[0].textContent).toContain("第 12 次变化");
+  });
+
+  it("ignores saves for games that are not launchable", () => {
+    saveGameSave("planned-table", 1, 9, { ok: true });
+    const { container } = renderLobby([
+      registration("planned-table", { availability: "planned" }),
+      registration("first-playable"),
+    ]);
+
+    expect(container.querySelector(".continue-strip")).toBeNull();
+  });
+
+  it("launches a game from the continue strip", () => {
+    saveGameSave("first-playable", 1, 3, { ok: true });
+    const onLaunch = vi.fn();
+    renderLobby([registration("first-playable")], onLaunch);
+
+    screen.getByRole("button", { name: /继续first-playable 牌桌/ }).click();
+    expect(onLaunch).toHaveBeenCalledWith("first-playable");
   });
 });
