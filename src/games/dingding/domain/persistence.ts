@@ -5,6 +5,7 @@ import {
   createDefaultDingRootState,
   startDingMatch,
   type ActiveDingMatch,
+  type DingHeroDraft,
   type DingLifetimeProfile,
   type DingRootState,
 } from "./session";
@@ -35,12 +36,12 @@ const CARD_KINDS = new Set<string>(["basic", "trick", "equipment"]);
 const CARD_TYPES = new Set<string>([
   "strike", "evade", "salve",
   "focus", "dismantle", "snatch", "nullify",
-  "duel", "horde", "volley", "grove", "aid",
-  "weapon", "minus-horse", "plus-horse",
+  "duel", "horde", "volley", "grove", "aid", "probe",
+  "weapon", "armor", "minus-horse", "plus-horse",
   "delay-play", "delay-draw", "delay-burn",
 ]);
-const TRICK_TYPES = new Set<string>(["focus", "dismantle", "snatch", "nullify", "duel", "horde", "volley", "grove", "aid"]);
-const SLOTS: readonly EquipmentSlot[] = ["weapon", "minusHorse", "plusHorse"];
+const TRICK_TYPES = new Set<string>(["focus", "dismantle", "snatch", "nullify", "duel", "horde", "volley", "grove", "aid", "probe"]);
+const SLOTS: readonly EquipmentSlot[] = ["weapon", "armor", "minusHorse", "plusHorse"];
 
 function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -60,6 +61,14 @@ function isPlayerId(value: unknown): value is PlayerId {
 
 function isDifficulty(value: unknown): value is DingDifficulty {
   return typeof value === "string" && DIFFICULTIES.has(value);
+}
+
+function isHeroDraft(value: unknown): value is DingHeroDraft {
+  return isRecord(value)
+    && Array.isArray(value.options)
+    && value.options.length === 3
+    && value.options.every((heroId) => typeof heroId === "string" && HERO_IDS.includes(heroId as typeof HERO_IDS[number]))
+    && new Set(value.options).size === value.options.length;
 }
 
 function isCard(value: unknown): value is DingCard {
@@ -101,7 +110,13 @@ function isEquipment(value: unknown): boolean {
   if (!isRecord(value)) return false;
   for (const [slot, card] of Object.entries(value)) {
     if (!SLOTS.includes(slot as EquipmentSlot) || !isCard(card)) return false;
-    const expected = slot === "weapon" ? "weapon" : slot === "minusHorse" ? "minus-horse" : "plus-horse";
+    const expected = slot === "weapon"
+      ? "weapon"
+      : slot === "armor"
+        ? "armor"
+        : slot === "minusHorse"
+          ? "minus-horse"
+          : "plus-horse";
     if (card.type !== expected) return false;
   }
   return true;
@@ -153,7 +168,8 @@ function isFrame(value: unknown): value is ResolutionFrame {
     return isPlayerId(value.actorId)
       && isPlayerId(value.targetId)
       && typeof value.cardUid === "string"
-      && isPositiveInteger(value.damage);
+      && isPositiveInteger(value.damage)
+      && (value.unavoidable === undefined || typeof value.unavoidable === "boolean");
   }
   if (value.kind === "dying") {
     return isPlayerId(value.targetId)
@@ -173,6 +189,22 @@ function isFrame(value: unknown): value is ResolutionFrame {
     return isPlayerId(value.ownerId)
       && typeof value.cardUid === "string" && value.cardUid.length > 0
       && isPlayerId(value.sourceActorId);
+  }
+  if (value.kind === "protect") {
+    return isPlayerId(value.actorId)
+      && isPlayerId(value.targetId)
+      && isPlayerId(value.protectorId)
+      && value.actorId !== value.targetId
+      && value.targetId !== value.protectorId
+      && value.actorId !== value.protectorId
+      && typeof value.cardUid === "string" && value.cardUid.length > 0
+      && isPositiveInteger(value.damage);
+  }
+  if (value.kind === "probe") {
+    return isPlayerId(value.actorId)
+      && isPlayerId(value.targetId)
+      && value.actorId !== value.targetId
+      && typeof value.cardUid === "string" && value.cardUid.length > 0;
   }
   if (value.kind === "trick") {
     if (!isPositiveInteger(value.frameId)
@@ -222,7 +254,7 @@ function validateStack(data: UnknownRecord, discard: readonly DingCard[]): boole
       if (frame.counterFrameId !== undefined && !frameIds.includes(frame.counterFrameId)) return false;
       if (frame.negated === true && frame.awaitingResponse === true) return false;
     }
-    if (frame.kind === "strike" || frame.kind === "trick" || frame.kind === "duel" || frame.kind === "horde" || frame.kind === "volley") {
+    if (frame.kind === "strike" || frame.kind === "trick" || frame.kind === "duel" || frame.kind === "horde" || frame.kind === "volley" || frame.kind === "protect" || frame.kind === "probe") {
       // 已打出的牌可能在帧结算前因牌堆耗尽被重新洗回牌堆，甚至被技能摸回手牌；
       // 因此只要仍在任一合法牌堆中即可。
       const played = [
@@ -231,7 +263,11 @@ function validateStack(data: UnknownRecord, discard: readonly DingCard[]): boole
         ...players.flatMap((player) => player.hand),
       ].find((card) => card.id === frame.cardUid);
       if (!played) return false;
-      const expectedType = frame.kind === "trick" ? frame.cardType : frame.kind;
+      const expectedType = frame.kind === "trick"
+        ? frame.cardType
+        : frame.kind === "protect" || frame.kind === "probe"
+          ? frame.kind === "protect" ? "strike" : "probe"
+          : frame.kind;
       if (played.type !== expectedType) return false;
     }
     if (frame.kind === "strike" || frame.kind === "dying") {
@@ -248,6 +284,15 @@ function validateStack(data: UnknownRecord, discard: readonly DingCard[]): boole
           const target = players.find((player) => player.id === id);
           return target?.alive && target.hp < target.maxHp;
         })) return false;
+      } else if (skill.target === "other") {
+        if (frame.targetIds.length === 0) return false;
+        if (!frame.targetIds.every((id) => {
+          const target = players.find((player) => player.id === id);
+          if (!target?.alive || target.id === owner.id) return false;
+          if (skill.effect.kind === "discard-target") return target.hand.length > 0;
+          if (skill.effect.kind === "delay-target") return target.skillFlags[skill.effect.flag] !== true;
+          return true;
+        })) return false;
       } else if (frame.targetIds.length !== 0) return false;
       if (skill.cost.kind === "discard") {
         const filter = skill.cost.filter;
@@ -263,6 +308,17 @@ function validateStack(data: UnknownRecord, discard: readonly DingCard[]): boole
       if (!players.find((player) => player.id === frame.actorId)?.alive) return false;
       if (!players.find((player) => player.id === frame.targetId)?.alive) return false;
       if (!players.find((player) => player.id === frame.turnId)?.alive) return false;
+    } else if (frame.kind === "protect") {
+      const lord = players.find((player) => player.id === frame.targetId);
+      const protector = players.find((player) => player.id === frame.protectorId);
+      const attacker = players.find((player) => player.id === frame.actorId);
+      if (!lord?.alive || lord.identity !== "lord") return false;
+      if (!protector?.alive || protector.identity !== "loyalist" || protector.hand.length === 0) return false;
+      if (!attacker?.alive) return false;
+    } else if (frame.kind === "probe") {
+      const actor = players.find((player) => player.id === frame.actorId);
+      const target = players.find((player) => player.id === frame.targetId);
+      if (!actor?.alive || !target?.alive || target.revealed) return false;
     } else if (frame.kind === "trick") {
       // 无懈链期间不会发生伤害或退场，所有询问者都应仍在场。
       if (!frame.responders.every((id) => players.find((player) => player.id === id)?.alive)) return false;
@@ -311,7 +367,6 @@ function validateState(data: unknown): data is DingState {
   if (new Set(players.map((player) => player.heroId)).size !== players.length) return false;
   for (const player of players) {
     if (player.identity === "lord" && !player.revealed) return false;
-    if (player.alive && player.identity !== "lord" && player.revealed) return false;
   }
   const active = getPlayer(players, data.activePlayerId as PlayerId);
   if (!active.alive && data.status === "playing") return false;
@@ -388,7 +443,13 @@ function isLifetimeProfile(value: unknown): value is DingLifetimeProfile {
 function isActiveMatch(value: unknown, preferencesDifficulty: DingDifficulty): value is ActiveDingMatch {
   if (!isRecord(value)
     || typeof value.resultRecorded !== "boolean"
+    || (value.heroDraft !== undefined && !isHeroDraft(value.heroDraft))
     || !validateState(value.state)) return false;
+  if (value.heroDraft !== undefined) {
+    const draft = value.heroDraft as DingHeroDraft;
+    const human = (value.state as DingState).players.find((player) => player.controller === "human");
+    if (!human || !draft.options.includes(human.heroId as typeof HERO_IDS[number])) return false;
+  }
   return value.resultRecorded === (value.state.status === "finished")
     && value.state.difficulty === preferencesDifficulty;
 }

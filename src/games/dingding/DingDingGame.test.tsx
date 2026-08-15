@@ -6,7 +6,7 @@ import type { GamePersistenceHandle } from "../../core/games/types";
 import { SoundProvider } from "../../shared/audio/SoundProvider";
 import { buildDeck } from "./domain/data";
 import { DING_SAVE_SCHEMA_VERSION } from "./domain/persistence";
-import { createDefaultDingRootState, startDingMatch } from "./domain/session";
+import { createDefaultDingRootState, startDingMatch, startDingMatchWithHeroDraft, type DingRootState } from "./domain/session";
 import { createInitialState } from "./domain/engine";
 import { DingDingGame } from "./DingDingGame";
 import type { DingPlayer, DingState } from "./domain/types";
@@ -61,6 +61,107 @@ function skillTable(pending: boolean): DingState {
   };
 }
 
+function protectTable(): DingState {
+  const deck = buildDeck();
+  const strike = deck.find((card) => card.type === "strike")!;
+  const cost = deck.find((card) => card.type === "focus")!;
+  const heroIds = ["redblade", "ironward", "springtide", "cloudstep"] as const;
+  const players: DingPlayer[] = [
+    {
+      id: "south", displayName: "你", controller: "human", seat: 0,
+      identity: "loyalist", revealed: false, hp: 4, maxHp: 4, alive: true,
+      hand: [cost], equipment: {}, heroId: heroIds[0], skillFlags: {},
+    },
+    {
+      id: "east", displayName: "东座", controller: "ai", seat: 1,
+      identity: "rebel", revealed: false, hp: 4, maxHp: 4, alive: true,
+      hand: [], equipment: {}, heroId: heroIds[1], skillFlags: {},
+    },
+    {
+      id: "north", displayName: "北座", controller: "ai", seat: 2,
+      identity: "lord", revealed: true, hp: 5, maxHp: 5, alive: true,
+      hand: [], equipment: {}, heroId: heroIds[2], skillFlags: {},
+    },
+    {
+      id: "west", displayName: "西座", controller: "ai", seat: 3,
+      identity: "renegade", revealed: false, hp: 4, maxHp: 4, alive: true,
+      hand: [], equipment: {}, heroId: heroIds[3], skillFlags: {},
+    },
+  ];
+  return {
+    revision: 3,
+    status: "playing",
+    phase: "play",
+    difficulty: "standard",
+    turnNumber: 1,
+    activePlayerId: "east",
+    players,
+    deck: deck.filter((card) => card.id !== strike.id && card.id !== cost.id),
+    discard: [strike],
+    delayedTricks: { south: [], east: [], north: [], west: [] },
+    strikeUsed: true,
+    stack: [{
+      kind: "protect",
+      actorId: "east",
+      targetId: "north",
+      protectorId: "south",
+      cardUid: strike.id,
+      damage: 1,
+    }],
+    log: [],
+    rngSeed: 1,
+  };
+}
+
+function probeTable(): DingState {
+  const deck = buildDeck();
+  const probe = deck.find((card) => card.type === "probe")!;
+  const heroIds = ["redblade", "ironward", "springtide", "cloudstep"] as const;
+  const players: DingPlayer[] = [
+    {
+      id: "south", displayName: "你", controller: "human", seat: 0,
+      identity: "lord", revealed: true, hp: 5, maxHp: 5, alive: true,
+      hand: [], equipment: {}, heroId: heroIds[0], skillFlags: {},
+    },
+    {
+      id: "east", displayName: "东座", controller: "ai", seat: 1,
+      identity: "rebel", revealed: false, hp: 4, maxHp: 4, alive: true,
+      hand: [], equipment: {}, heroId: heroIds[1], skillFlags: {},
+    },
+    {
+      id: "north", displayName: "北座", controller: "ai", seat: 2,
+      identity: "loyalist", revealed: false, hp: 4, maxHp: 4, alive: true,
+      hand: [], equipment: {}, heroId: heroIds[2], skillFlags: {},
+    },
+    {
+      id: "west", displayName: "西座", controller: "ai", seat: 3,
+      identity: "renegade", revealed: false, hp: 4, maxHp: 4, alive: true,
+      hand: [], equipment: {}, heroId: heroIds[3], skillFlags: {},
+    },
+  ];
+  return {
+    revision: 4,
+    status: "playing",
+    phase: "play",
+    difficulty: "standard",
+    turnNumber: 1,
+    activePlayerId: "south",
+    players,
+    deck: deck.filter((card) => card.id !== probe.id),
+    discard: [probe],
+    delayedTricks: { south: [], east: [], north: [], west: [] },
+    strikeUsed: false,
+    stack: [{
+      kind: "probe",
+      actorId: "south",
+      targetId: "east",
+      cardUid: probe.id,
+    }],
+    log: [],
+    rngSeed: 1,
+  };
+}
+
 function finishedReviewState(): DingState {
   const state = createInitialState(() => 0.37);
   const human = state.players.find((player) => player.controller === "human")!;
@@ -96,6 +197,10 @@ function finishedReviewState(): DingState {
 function renderWithState(state: DingState) {
   const save = vi.fn<GamePersistenceHandle["save"]>();
   const root = startDingMatch(createDefaultDingRootState(state.difficulty), state);
+  return renderWithRoot(root, save);
+}
+
+function renderWithRoot(root: DingRootState, save = vi.fn<GamePersistenceHandle["save"]>()) {
   const persistence: GamePersistenceHandle = {
     restored: { schemaVersion: DING_SAVE_SCHEMA_VERSION, data: root },
     save,
@@ -139,6 +244,42 @@ describe("DingDingGame active skill flow", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "完整记录" }));
     expect(screen.getByText("普通行动。")).toBeTruthy();
+  });
+
+  it("lets the human loyalist choose a card for the protect decision", () => {
+    const { save } = renderWithState(protectTable());
+
+    expect(screen.getByText("辅臣护主")).toBeTruthy();
+    expect(screen.getByText("主君受到刺击")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "选择「聚势」护主" }));
+    fireEvent.click(screen.getByRole("button", { name: "弃置护主" }));
+
+    expect(screen.queryByText("辅臣护主")).toBeNull();
+    expect(save).toHaveBeenCalled();
+  });
+
+  it("shows the hero draft and starts the match after choosing a hero", () => {
+    const root = startDingMatchWithHeroDraft(createDefaultDingRootState(), "standard", () => 0.37);
+    const { save } = renderWithRoot(root);
+
+    expect(screen.getByText("三选一 · 选择武将")).toBeTruthy();
+    const heroButtons = screen.getAllByRole("button", { name: /^选择武将/ });
+    expect(heroButtons).toHaveLength(3);
+    fireEvent.click(heroButtons[1]);
+
+    expect(screen.queryByText("三选一 · 选择武将")).toBeNull();
+    expect(save).toHaveBeenCalled();
+  });
+
+  it("lets the human guess an identity for 刺探", () => {
+    const { save } = renderWithState(probeTable());
+
+    expect(screen.getByText("刺探身份")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "叛锋" }));
+    fireEvent.click(screen.getByRole("button", { name: "确认猜测" }));
+
+    expect(screen.queryByText("刺探身份")).toBeNull();
+    expect(save).toHaveBeenCalled();
   });
 
   it("resolves a restored 青囊 decision by choosing a cost card and target", () => {

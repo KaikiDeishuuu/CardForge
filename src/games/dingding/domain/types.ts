@@ -18,15 +18,17 @@ export type DingCardType =
   | "volley"
   | "grove"
   | "aid"
+  | "probe"
   | "weapon"
+  | "armor"
   | "minus-horse"
   | "plus-horse"
   | "delay-play"
   | "delay-draw"
   | "delay-burn";
 /** 会进入结算栈、可被「无懈可击」响应的锦囊类型。 */
-export type TrickCardType = "focus" | "dismantle" | "snatch" | "nullify" | "duel" | "horde" | "volley" | "grove" | "aid";
-export type EquipmentSlot = "weapon" | "minusHorse" | "plusHorse";
+export type TrickCardType = "focus" | "dismantle" | "snatch" | "nullify" | "duel" | "horde" | "volley" | "grove" | "aid" | "probe";
+export type EquipmentSlot = "weapon" | "armor" | "minusHorse" | "plusHorse";
 export type PlayerId = "south" | "east" | "north" | "west";
 
 export interface DingCard extends CardIdentity {
@@ -52,7 +54,7 @@ export interface DingPlayer extends ParticipantIdentity {
   readonly equipment: Readonly<Partial<Record<EquipmentSlot, DingCard>>>;
   /** 武将 id，索引 HERO_CATALOG；空字符串表示测试状态没有武将。 */
   readonly heroId: string;
-  /** 按技能触发点记录的本回合一次性标记，回合结束时清空。 */
+  /** 技能触发/增益标记；回合结束时清空，`buff:next-damage-reduction`（坚壁）持续到拥有者下个回合开始。 */
   readonly skillFlags: Readonly<Record<string, boolean>>;
 }
 
@@ -64,7 +66,9 @@ export interface DingPlayer extends ParticipantIdentity {
  * - `trick`：锦囊等待无懈可击响应；`nullify` 帧代表一张「无懈可击」本身，
  *   它可以被另一张「无懈可击」反制，形成可插入的嵌套链；
  * - `duel`：约斗双方轮流打刺击，先打不出的一方受到伤害；
- * - `horde` / `volley`：群体锦囊逐个求刺击/闪避，期间触发的濒死帧压在其上，救回后继续。
+ * - `horde` / `volley`：群体锦囊逐个求刺击/闪避，期间触发的濒死帧压在其上，救回后继续；
+ * - `protect`：主君被刺击且未闪避时，由存活辅臣决定是否弃 1 张手牌护主；
+ * - `probe`：刺探生效后，由使用者猜测目标身份。
  *
  * 栈顶（数组最后一项）是当前等待响应的结算；新帧只会压入栈顶，
  * 结算完成后从栈顶弹出，露出下一段待处理结算。
@@ -75,6 +79,8 @@ export interface PendingStrike {
   readonly targetId: PlayerId;
   readonly cardUid: string;
   readonly damage: number;
+  /** 由武将技能造成的必中刺击，不能被「闪避」响应。 */
+  readonly unavoidable?: boolean;
 }
 
 export interface PendingDying {
@@ -91,7 +97,7 @@ export interface PendingDying {
 
 /**
  * 可选武将技能：与锦囊/濒死一样进入结算栈，由技能拥有者选择消耗与目标，
- * 或放弃发动。M3 为 8 名武将各提供一个主动技。
+ * 或放弃发动。多数武将各提供一个主动技。
  */
 export interface PendingSkill {
   readonly kind: "skill";
@@ -167,7 +173,36 @@ export interface PendingVolley {
   readonly cursor: number;
 }
 
-export type ResolutionFrame = PendingStrike | PendingDying | PendingSkill | PendingTrick | PendingDuel | PendingHorde | PendingVolley | PendingDelayed;
+/**
+ * 辅臣护主决策帧：主君没有闪避刺击时压入，由存活辅臣选择
+ * 弃置任意 1 张手牌抵挡 1 点伤害，或放弃（不公开身份）。
+ */
+/**
+ * 刺探身份决策帧：刺探未被无懈抵消后，由使用者猜测目标身份。
+ * 猜对会公开目标身份并摸两张牌；猜错由使用者随机弃置一张手牌。
+ */
+export interface PendingProbe {
+  readonly kind: "probe";
+  readonly actorId: PlayerId;
+  readonly targetId: PlayerId;
+  readonly cardUid: string;
+}
+
+export interface PendingProtect {
+  readonly kind: "protect";
+  /** 刺击来源，护主成功时仍作为后续伤害来源。 */
+  readonly actorId: PlayerId;
+  /** 受到刺击的主君。 */
+  readonly targetId: PlayerId;
+  /** 当前唯一可决定是否护主的存活辅臣；不能是刺击来源本人。 */
+  readonly protectorId: PlayerId;
+  /** 待结算的刺击牌 id。 */
+  readonly cardUid: string;
+  /** 原刺击伤害。 */
+  readonly damage: number;
+}
+
+export type ResolutionFrame = PendingStrike | PendingDying | PendingSkill | PendingTrick | PendingDuel | PendingHorde | PendingVolley | PendingDelayed | PendingProtect | PendingProbe;
 
 export interface DingLogEntry {
   readonly id: number;

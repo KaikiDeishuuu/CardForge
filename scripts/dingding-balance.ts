@@ -10,6 +10,8 @@ import {
   respondToDuel,
   respondToDying,
   respondToHorde,
+  respondToProbe,
+  respondToProtect,
   respondToSkill,
   respondToStrike,
   respondToTrick,
@@ -22,6 +24,8 @@ import {
   chooseAiHordeResponse,
   chooseAiMove,
   chooseAiNullifyResponse,
+  chooseAiProbeGuess,
+  chooseAiProtectResponse,
   chooseAiSkillDecision,
   chooseAiStrikeResponse,
   chooseAiVolleyResponse,
@@ -95,6 +99,10 @@ for (let seed = 1; seed <= matchCount; seed += 1) {
       state = respondToDying(state, responder, chooseAiDyingResponse(state, responder));
     } else if (top?.kind === "skill") {
       state = respondToSkill(state, top.ownerId, chooseAiSkillDecision(state, top.ownerId));
+    } else if (top?.kind === "protect") {
+      state = respondToProtect(state, top.protectorId, chooseAiProtectResponse(state, top.protectorId));
+    } else if (top?.kind === "probe") {
+      state = respondToProbe(state, top.actorId, chooseAiProbeGuess(state, top.actorId));
     } else if (top?.kind === "delayed") {
       const card = state.delayedTricks[top.ownerId]?.find((entry) => entry.card.id === top.cardUid)?.card;
       if (card) delayedJudgments[card.type] = (delayedJudgments[card.type] ?? 0) + 1;

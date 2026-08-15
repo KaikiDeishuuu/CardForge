@@ -6,6 +6,8 @@ import {
   chooseAiHordeResponse,
   chooseAiMove,
   chooseAiNullifyResponse,
+  chooseAiProbeGuess,
+  chooseAiProtectResponse,
   chooseAiSkillDecision,
   chooseAiStrikeResponse,
   chooseAiVolleyResponse,
@@ -18,6 +20,7 @@ import {
   advancePhase,
   attackRange,
   changeDifficulty,
+  chooseHero,
   createInitialState,
   discardCards,
   distanceBetween,
@@ -30,6 +33,8 @@ import {
   respondToDuel,
   respondToDying,
   respondToHorde,
+  respondToProbe,
+  respondToProtect,
   respondToSkill,
   respondToStrike,
   respondToTrick,
@@ -52,6 +57,8 @@ const CARD_DEFINITIONS: Record<string, Omit<DingCard, "id">> = {
   volley: { name: "齐射", kind: "trick", type: "volley", symbol: "矢", tone: "#000", description: "test" },
   grove: { name: "同袍", kind: "trick", type: "grove", symbol: "和", tone: "#000", description: "test" },
   aid: { name: "援护", kind: "trick", type: "aid", symbol: "援", tone: "#000", description: "test" },
+  probe: { name: "刺探", kind: "trick", type: "probe", symbol: "窥", tone: "#000", description: "test" },
+  armor: { name: "犀甲", kind: "equipment", type: "armor", symbol: "甲", tone: "#000", description: "test" },
   "delay-play": { name: "断锋", kind: "trick", type: "delay-play", symbol: "封", tone: "#000", description: "test" },
   "delay-draw": { name: "困阵", kind: "trick", type: "delay-draw", symbol: "困", tone: "#000", description: "test" },
   "delay-burn": { name: "焚营", kind: "trick", type: "delay-burn", symbol: "焚", tone: "#000", description: "test" },
@@ -154,6 +161,24 @@ describe("Ding Ding engine", () => {
     expect(new Set(heroIds).size).toBe(4);
     expect(heroIds.every((id) => id in HERO_CATALOG)).toBe(true);
     expect(initial.players.every((entry) => Object.keys(entry.skillFlags).length === 0)).toBe(true);
+  });
+
+  it("uses hero max hp for the initial table and swaps only the human hero during the draft", () => {
+    const lineup = ["redblade", "springtide", "nightowl", "ironward"] as const;
+    const initial = createInitialState(fixedRandom, "standard", lineup);
+    for (const player of initial.players) {
+      const heroMaxHp = HERO_CATALOG[player.heroId as keyof typeof HERO_CATALOG].maxHp;
+      expect(player.maxHp).toBe(player.identity === "lord" ? heroMaxHp + 1 : heroMaxHp);
+      expect(player.hp).toBe(player.maxHp);
+    }
+
+    const chosen = chooseHero(initial, "south", "scrollkeeper");
+    expect(chosen.players[0].heroId).toBe("scrollkeeper");
+    expect(chosen.players.filter((player) => player.heroId === "scrollkeeper")).toHaveLength(1);
+    expect(chosen.revision).toBe(1);
+
+    const duplicate = chooseHero(initial, "south", "springtide");
+    expect(duplicate).toBe(initial);
   });
 
   it("applies hero distance passives", () => {
@@ -267,6 +292,28 @@ describe("Ding Ding engine", () => {
     expect(damaged.players[0].hp).toBe(4);
     expect(damaged.players[0].skillFlags["buff:next-damage-reduction"]).toBe(false);
     expect(damaged.log.some((entry) => entry.text.includes("抵挡"))).toBe(true);
+  });
+
+  it("keeps 坚壁 across other players' turns until the owner's next turn starts", () => {
+    const game = state({ phase: "play" }, [
+      player("south", { skillFlags: { "buff:next-damage-reduction": true } }),
+      player("east"),
+      player("north"),
+      player("west"),
+    ]);
+
+    const ended = endTurn(game, "south");
+    expect(ended.players[0].skillFlags["buff:next-damage-reduction"]).toBe(true);
+
+    const backToSouth = state({ phase: "prepare", activePlayerId: "south", turnNumber: 5 }, [
+      player("south", { skillFlags: { "buff:next-damage-reduction": true } }),
+      player("east"),
+      player("north"),
+      player("west"),
+    ]);
+    const expired = advancePhase(backToSouth);
+    expect(expired.players[0].skillFlags["buff:next-damage-reduction"]).toBeUndefined();
+    expect(expired.phase).toBe("judge");
   });
 
   it("uses 潜行 to further increase the distance others calculate to the owner", () => {
@@ -396,6 +443,156 @@ describe("Ding Ding engine", () => {
     ]);
     const equipped = playCard(game, "south", "longshot-0", "south");
     expect(getTargetOptions(equipped, "south", strike)).toEqual(["east", "north", "west"]);
+  });
+
+  it("resolves 演策 draw-discard while keeping high-value response cards", () => {
+    const game = state({ deck: [card("evade", "keep-evade"), card("salve", "keep-salve")], rngSeed: 7 }, [
+      player("south", { heroId: "xuanji", hand: [card("strike", "yance-cost")] }),
+      player("east"),
+      player("north"),
+      player("west"),
+    ]);
+    const pending = activateSkill(game, "south", "yance");
+    const resolved = respondToSkill(pending, "south", { cardUid: "yance-cost" });
+    expect(resolved.stack).toHaveLength(0);
+    expect(resolved.players[0].hand.map((entry) => entry.id)).toEqual(["keep-salve"]);
+    expect(resolved.discard.map((entry) => entry.id)).toEqual(expect.arrayContaining(["yance-cost", "keep-evade"]));
+  });
+
+  it("draws two cards for 金枝 when another character dies", () => {
+    const game = state({ activePlayerId: "east", deck: [card("evade", "p1"), card("focus", "p2")], rngSeed: 7 }, [
+      player("south", { identity: "lord", heroId: "jinyu" }),
+      player("east", { identity: "rebel", hand: [card("strike", "strike-0")] }),
+      player("north", { identity: "renegade", hp: 1 }),
+      player("west", { identity: "loyalist" }),
+    ]);
+    let next = respondToStrike(playCard(game, "east", "strike-0", "north"), "north");
+    while (next.stack.at(-1)?.kind === "dying") {
+      const dying = next.stack.at(-1);
+      if (dying?.kind !== "dying") break;
+      next = respondToDying(next, dying.responders[dying.cursor]);
+    }
+    expect(next.players.find((player) => player.id === "north")?.alive).toBe(false);
+    expect(next.players[0].hand).toHaveLength(2);
+    expect(next.log.some((entry) => entry.text.includes("金枝"))).toBe(true);
+  });
+
+  it("silences the killer when 乐姬 dies", () => {
+    const game = state({ activePlayerId: "east" }, [
+      player("south", { identity: "lord" }),
+      player("east", {
+        identity: "rebel",
+        heroId: "redblade",
+        hand: [card("strike", "strike-0"), card("strike", "strike-1")],
+      }),
+      player("north", { identity: "loyalist", heroId: "yueji", hp: 1 }),
+      player("west", { identity: "renegade" }),
+    ]);
+    let next = respondToStrike(playCard(game, "east", "strike-0", "north"), "north");
+    while (next.stack.at(-1)?.kind === "dying") {
+      const dying = next.stack.at(-1);
+      if (dying?.kind !== "dying") break;
+      next = respondToDying(next, dying.responders[dying.cursor]);
+    }
+    expect(next.players.find((player) => player.id === "north")?.alive).toBe(false);
+    expect(next.players[1].skillFlags.silenced).toBe(true);
+    expect(next.log.some((entry) => entry.text.includes("绝弦"))).toBe(true);
+    expect(getActiveSkillUse(next, "east")).toBeUndefined();
+  });
+
+  it("makes the next strike unavoidable with 破坚", () => {
+    const game = state({}, [
+      player("south", { heroId: "liexiao", hand: [card("strike", "pojian-cost"), card("strike", "pojian-hit")] }),
+      player("east", { hand: [card("evade", "evade-e")] }),
+      player("north"),
+      player("west"),
+    ]);
+    const pending = activateSkill(game, "south", "pojian");
+    const buffed = respondToSkill(pending, "south", { cardUid: "pojian-cost" });
+    const strike = playCard(buffed, "south", "pojian-hit", "east");
+    expect(strike.stack.at(-1)).toMatchObject({ kind: "strike", unavoidable: true });
+    expect(respondToStrike(strike, "east", "evade-e")).toBe(strike);
+    const hit = respondToStrike(strike, "east");
+    expect(hit.players[1].hp).toBe(3);
+  });
+
+  it("resets strike usage with 再战", () => {
+    const game = state({}, [
+      player("south", { heroId: "wufeng", hand: [card("strike", "s1"), card("strike", "zaizhan-cost"), card("strike", "s2")] }),
+      player("east"),
+      player("north"),
+      player("west"),
+    ]);
+    const used = respondToStrike(playCard(game, "south", "s1", "east"), "east");
+    expect(used.strikeUsed).toBe(true);
+    const pending = activateSkill(used, "south", "zaizhan");
+    const reset = respondToSkill(pending, "south", { cardUid: "zaizhan-cost" });
+    expect(reset.strikeUsed).toBe(false);
+    const second = playCard(reset, "south", "s2", "east");
+    expect(second.stack.at(-1)).toMatchObject({ kind: "strike" });
+  });
+
+  it("uses the expanded active skill target effects", () => {
+    const damageGame = state({}, [
+      player("south", { heroId: "chongzhen", hand: [card("strike", "xianzhen-cost")] }),
+      player("east", { hp: 4 }),
+      player("north"),
+      player("west"),
+    ]);
+    const damagePending = activateSkill(damageGame, "south", "xianzhen");
+    const damaged = respondToSkill(damagePending, "south", { cardUid: "xianzhen-cost", targetId: "east" });
+    expect(damaged.players[1].hp).toBe(3);
+
+    const discardGame = state({}, [
+      player("south", { heroId: "youjiao", hand: [card("focus", "jiaoxie-cost")] }),
+      player("east", { hand: [card("evade", "victim-evade")] }),
+      player("north"),
+      player("west"),
+    ]);
+    const discardPending = activateSkill(discardGame, "south", "jiaoxie");
+    const discarded = respondToSkill(discardPending, "south", { cardUid: "jiaoxie-cost", targetId: "east" });
+    expect(discarded.players[1].hand).toEqual([]);
+    expect(discarded.discard.some((entry) => entry.id === "victim-evade")).toBe(true);
+
+    const delayGame = state({}, [
+      player("south", { heroId: "junshi", hand: [card("focus", "kunju-cost")] }),
+      player("east"),
+      player("north"),
+      player("west"),
+    ]);
+    const delayPending = activateSkill(delayGame, "south", "kunju");
+    const delayed = respondToSkill(delayPending, "south", { cardUid: "kunju-cost", targetId: "east" });
+    expect(delayed.players[1].skillFlags["delay:skip-play"]).toBe(true);
+
+    const healGame = state({}, [
+      player("south", { heroId: "panwei", hp: 3, maxHp: 5 }),
+      player("east"),
+      player("north"),
+      player("west"),
+    ]);
+    const healPending = activateSkill(healGame, "south", "zhengbei");
+    const healed = respondToSkill(healPending, "south", {});
+    expect(healed.players[0].hp).toBe(4);
+
+    const supportGame = state({ deck: [card("evade", "support-1")], rngSeed: 7 }, [
+      player("south", { heroId: "fubi" }),
+      player("east"),
+      player("north"),
+      player("west"),
+    ]);
+    const supportPending = activateSkill(supportGame, "south", "jujian");
+    const supported = respondToSkill(supportPending, "south", { targetId: "east" });
+    expect(supported.players[1].hand.map((entry) => entry.id)).toEqual(["support-1"]);
+
+    const burstGame = state({ deck: [card("evade", "b1"), card("evade", "b2"), card("evade", "b3")], rngSeed: 7 }, [
+      player("south", { heroId: "haoke", hand: [card("focus", "haozhi-cost")] }),
+      player("east"),
+      player("north"),
+      player("west"),
+    ]);
+    const burstPending = activateSkill(burstGame, "south", "haozhi");
+    const burst = respondToSkill(burstPending, "south", { cardUid: "haozhi-cost" });
+    expect(burst.players[0].hand).toHaveLength(3);
   });
 
   it("draws at turn start with 夜枭巡夜", () => {
@@ -576,7 +773,7 @@ describe("Ding Ding engine", () => {
     expect(next.log.some((entry) => entry.text.includes("击退叛锋"))).toBe(false);
   });
 
-  it("rewards a rebel with three cards for taking down the lord", () => {
+  it("ends the match when a rebel takes down the lord without awarding decorative cards", () => {
     const game = state({ activePlayerId: "east", deck: [card("evade", "d1"), card("evade", "d2"), card("evade", "d3")], rngSeed: 7 }, [
       player("south", { hp: 1, identity: "lord", revealed: true, hand: [card("strike", "lord-card")] }),
       player("east", { identity: "rebel", hand: [card("strike", "strike-0")] }),
@@ -592,11 +789,12 @@ describe("Ding Ding engine", () => {
     }
     expect(next.status).toBe("finished");
     expect(next.winner).toBe("rebel");
-    expect(next.players[1].hand).toHaveLength(3);
-    expect(next.log.some((entry) => entry.text.includes("击退主君，摸 3 张牌"))).toBe(true);
+    expect(next.players[1].hand).toHaveLength(0);
+    expect(next.deck).toHaveLength(3);
+    expect(next.log.some((entry) => entry.text.includes("击退主君，摸 3 张牌"))).toBe(false);
   });
 
-  it("lets a living loyalist passively reduce strike damage to the lord", () => {
+  it("asks the living loyalist to choose whether to protect the lord", () => {
     const game = state({ activePlayerId: "east" }, [
       player("south", { hp: 3, identity: "lord", revealed: true }),
       player("east", { identity: "rebel", hand: [card("strike", "strike-0")] }),
@@ -604,18 +802,178 @@ describe("Ding Ding engine", () => {
       player("west", { identity: "renegade" }),
     ]);
 
-    const protectedHit = respondToStrike(playCard(game, "east", "strike-0", "south"), "south");
-    expect(protectedHit.players[0].hp).toBe(3);
-    expect(protectedHit.log.some((entry) => entry.text.includes("护主"))).toBe(true);
+    const pendingProtect = respondToStrike(playCard(game, "east", "strike-0", "south"), "south");
+    expect(pendingProtect.stack.at(-1)).toMatchObject({
+      kind: "protect",
+      actorId: "east",
+      targetId: "south",
+      protectorId: "north",
+      damage: 1,
+    });
+    expect(pendingProtect.players[0].hp).toBe(3);
 
-    const withoutLoyalist = state({ activePlayerId: "east" }, [
+    const protectedHit = respondToProtect(pendingProtect, "north", "protect-cost");
+    expect(protectedHit.stack).toHaveLength(0);
+    expect(protectedHit.players[0].hp).toBe(3);
+    expect(protectedHit.players[2].revealed).toBe(true);
+    expect(protectedHit.discard.map((entry) => entry.id)).toContain("protect-cost");
+    expect(protectedHit.log.some((entry) => entry.text.includes("north弃置「闪避」护主"))).toBe(true);
+  });
+
+  it("lets the loyalist decline protection without being named in the log", () => {
+    const game = state({ activePlayerId: "east" }, [
       player("south", { hp: 3, identity: "lord", revealed: true }),
-      player("east", { identity: "rebel", hand: [card("strike", "strike-1")] }),
-      player("north", { identity: "loyalist", alive: false, hp: 0, revealed: true }),
+      player("east", { identity: "rebel", hand: [card("strike", "strike-0")] }),
+      player("north", { identity: "loyalist", hand: [card("evade", "protect-cost")] }),
       player("west", { identity: "renegade" }),
     ]);
-    const hit = respondToStrike(playCard(withoutLoyalist, "east", "strike-1", "south"), "south");
+
+    const pendingProtect = respondToStrike(playCard(game, "east", "strike-0", "south"), "south");
+    const hit = respondToProtect(pendingProtect, "north");
+    expect(hit.stack).toHaveLength(0);
     expect(hit.players[0].hp).toBe(2);
+    expect(hit.log.some((entry) => entry.text.includes("north"))).toBe(false);
+    expect(hit.log.some((entry) => entry.text.includes("无人护主"))).toBe(true);
+  });
+
+  it("does not offer protection when the loyalist is the attacker", () => {
+    const game = state({ activePlayerId: "east" }, [
+      player("south", { hp: 5, identity: "lord", revealed: true }),
+      player("east", { identity: "loyalist", hand: [card("strike", "strike-0")] }),
+      player("north", { identity: "rebel" }),
+      player("west", { identity: "renegade" }),
+    ]);
+
+    const hit = respondToStrike(playCard(game, "east", "strike-0", "south"), "south");
+    expect(hit.stack.at(-1)?.kind).not.toBe("protect");
+    expect(hit.players[0].hp).toBe(4);
+  });
+
+  it("deals damage directly when no living loyalist can pay the protection cost", () => {
+    const game = state({ activePlayerId: "east" }, [
+      player("south", { hp: 3, identity: "lord", revealed: true }),
+      player("east", { identity: "rebel", hand: [card("strike", "strike-1")] }),
+      player("north", { identity: "loyalist", hand: [] }),
+      player("west", { identity: "renegade" }),
+    ]);
+
+    const hit = respondToStrike(playCard(game, "east", "strike-1", "south"), "south");
+    expect(hit.stack.at(-1)?.kind).not.toBe("protect");
+    expect(hit.players[0].hp).toBe(2);
+  });
+
+  it("lets 拆解 strip equipment or delayed tricks when the target has no hand", () => {
+    const equipmentGame = state({}, [
+      player("south", { hand: [card("dismantle", "dismantle-0")] }),
+      player("east", { hand: [], equipment: { weapon: card("longblade", "longblade-0") } }),
+      player("north"),
+      player("west"),
+    ]);
+    const strippedEquipment = passAllTrickResponses(playCard(equipmentGame, "south", "dismantle-0", "east"));
+    expect(strippedEquipment.players[1].equipment.weapon).toBeUndefined();
+    expect(strippedEquipment.discard.some((entry) => entry.id === "longblade-0")).toBe(true);
+
+    const delayed = card("delay-burn", "delay-burn-0");
+    const delayedGame = state({
+      delayedTricks: {
+        south: [], north: [], west: [],
+        east: [{ card: delayed, sourceActorId: "south" }],
+      },
+    }, [
+      player("south", { hand: [card("dismantle", "dismantle-1")] }),
+      player("east", { hand: [] }),
+      player("north"),
+      player("west"),
+    ]);
+    const strippedDelayed = passAllTrickResponses(playCard(delayedGame, "south", "dismantle-1", "east"));
+    expect(strippedDelayed.delayedTricks.east).toEqual([]);
+    expect(strippedDelayed.discard.some((entry) => entry.id === "delay-burn-0")).toBe(true);
+  });
+
+  it("lets 牵袭 take equipment or delayed tricks from an adjacent player", () => {
+    const equipmentGame = state({}, [
+      player("south", { hand: [card("snatch", "snatch-0")] }),
+      player("east", { hand: [], equipment: { weapon: card("longblade", "longblade-0") } }),
+      player("north"),
+      player("west"),
+    ]);
+    const snatchedEquipment = passAllTrickResponses(playCard(equipmentGame, "south", "snatch-0", "east"));
+    expect(snatchedEquipment.players[1].equipment.weapon).toBeUndefined();
+    expect(snatchedEquipment.players[0].hand.some((entry) => entry.id === "longblade-0")).toBe(true);
+
+    const delayed = card("delay-draw", "delay-draw-0");
+    const delayedGame = state({
+      delayedTricks: {
+        south: [], north: [], west: [],
+        east: [{ card: delayed, sourceActorId: "south" }],
+      },
+    }, [
+      player("south", { hand: [card("snatch", "snatch-1")] }),
+      player("east", { hand: [] }),
+      player("north"),
+      player("west"),
+    ]);
+    const snatchedDelayed = passAllTrickResponses(playCard(delayedGame, "south", "snatch-1", "east"));
+    expect(snatchedDelayed.delayedTricks.east).toEqual([]);
+    expect(snatchedDelayed.players[0].hand.some((entry) => entry.id === "delay-draw-0")).toBe(true);
+  });
+
+  it("uses 犀甲 to reduce the first damage each turn", () => {
+    const armored = state({ activePlayerId: "east" }, [
+      player("south", { hp: 4, maxHp: 5, equipment: { armor: card("armor", "armor-0") } }),
+      player("east", { hand: [card("strike", "strike-0"), card("strike", "strike-1")] }),
+      player("north", { alive: false, hp: 0, revealed: true }),
+      player("west", { identity: "loyalist", alive: false, hp: 0, revealed: true }),
+    ]);
+    let next = respondToStrike(playCard(armored, "east", "strike-0", "south"), "south");
+    expect(next.players[0].hp).toBe(4);
+    expect(next.players[0].skillFlags["armor:reduced"]).toBe(true);
+    expect(next.log.some((entry) => entry.text.includes("犀甲"))).toBe(true);
+
+    next = respondToStrike(playCard({ ...next, strikeUsed: false }, "east", "strike-1", "south"), "south");
+    expect(next.players[0].hp).toBe(3);
+  });
+
+  it("resolves 刺探 with a correct or wrong identity guess", () => {
+    const probeGame = state({ deck: [card("evade", "d1"), card("evade", "d2")], rngSeed: 7 }, [
+      player("south", { hand: [card("probe", "probe-0")] }),
+      player("east", { identity: "rebel" }),
+      player("north", { identity: "loyalist" }),
+      player("west", { identity: "renegade" }),
+    ]);
+    const pending = passAllTrickResponses(playCard(probeGame, "south", "probe-0", "east"));
+    expect(pending.stack.at(-1)).toMatchObject({ kind: "probe", actorId: "south", targetId: "east" });
+
+    const guessed = respondToProbe(pending, "south", "rebel");
+    expect(guessed.stack).toHaveLength(0);
+    expect(guessed.players[1].revealed).toBe(true);
+    expect(guessed.players[0].hand.map((entry) => entry.id)).toEqual(["d2", "d1"]);
+    expect(guessed.log.some((entry) => entry.text.includes("是「叛锋」"))).toBe(true);
+
+    const wrongGame = state({}, [
+      player("south", { hand: [card("probe", "probe-1"), card("strike", "probe-cost")] }),
+      player("east", { identity: "rebel" }),
+      player("north", { identity: "loyalist" }),
+      player("west", { identity: "renegade" }),
+    ]);
+    const wrongPending = passAllTrickResponses(playCard(wrongGame, "south", "probe-1", "east"));
+    const missed = respondToProbe(wrongPending, "south", "loyalist");
+    expect(missed.players[1].revealed).toBe(false);
+    expect(missed.players[0].hand).toEqual([]);
+    expect(missed.discard.some((entry) => entry.id === "probe-cost")).toBe(true);
+    expect(missed.log.some((entry) => entry.text.includes("是「叛锋」"))).toBe(false);
+  });
+
+  it("remembers public loyalist signals when forming identity beliefs", () => {
+    const game = state({ log: [{ id: 1, text: "north弃置「闪避」护主，为主君抵挡 1 点伤害。" }] }, [
+      player("south"),
+      player("east"),
+      player("north", { identity: "loyalist" }),
+      player("west"),
+    ]);
+    const belief = identityBelief(game, "east", "north");
+    expect(belief.loyalist).toBeGreaterThan(belief.rebel);
+    expect(belief.loyalist).toBeGreaterThan(belief.renegade);
   });
 
   it("applies non-lethal global overheat after the configured round", () => {
@@ -827,6 +1185,20 @@ describe("Ding Ding engine", () => {
     expect(next.stack).toHaveLength(0);
     expect(next.players[1].hp).toBe(4);
     expect(next.log.some((entry) => entry.text.includes("约斗") && entry.text.includes("抵消"))).toBe(true);
+  });
+
+  it("defaults horde, volley and grove to the actor when targetId is omitted", () => {
+    for (const type of ["horde", "volley", "grove"] as const) {
+      const game = state({}, [
+        player("south", { hand: [card(type, `${type}-0`)] }),
+        player("east"),
+        player("north"),
+        player("west"),
+      ]);
+      const played = playCard(game, "south", `${type}-0`);
+      expect(played).not.toBe(game);
+      expect(played.stack.at(-1)).toMatchObject({ kind: "trick", cardType: type });
+    }
   });
 
   it("cycles horde responses and damages players who do not strike", () => {
@@ -1093,6 +1465,70 @@ describe("Ding Ding engine", () => {
     expect(judged.discard.some((entry) => entry.id === "delay-burn-0")).toBe(true);
   });
 
+  it("ends the turn immediately when 焚营 kills the judge instead of giving the corpse a draw and play phase", () => {
+    const delayed = card("delay-burn", "delay-burn-0");
+    const game = state({
+      phase: "judge",
+      activePlayerId: "east",
+      deck: [card("focus", "judge-focus")],
+      rngSeed: 7,
+      delayedTricks: {
+        south: [], west: [], north: [],
+        east: [{ card: delayed, sourceActorId: "south" }],
+      },
+    }, [
+      player("south"),
+      player("east", { hp: 1 }),
+      player("north"),
+      player("west"),
+    ]);
+
+    let next = respondToDelayed(advancePhase(game), "east");
+    while (next.stack.at(-1)?.kind === "dying") {
+      const dying = next.stack.at(-1);
+      if (dying?.kind !== "dying") break;
+      next = respondToDying(next, dying.responders[dying.cursor]);
+    }
+
+    const east = next.players.find((player) => player.id === "east")!;
+    expect(east.alive).toBe(false);
+    expect(east.hand).toEqual([]);
+    expect(next.stack).toHaveLength(0);
+    expect(next.phase).toBe("judge");
+    expect(next.activePlayerId).toBe("east");
+
+    const handedOff = advancePhase(next);
+    expect(handedOff.phase).toBe("prepare");
+    expect(handedOff.activePlayerId).toBe("north");
+    expect(handedOff.turnNumber).toBe(2);
+    expect(handedOff.deck).toHaveLength(0);
+    expect(handedOff.log.some((entry) => entry.text.includes("east的回合结束"))).toBe(true);
+  });
+
+  it("does not let a dead active player draw, play or discard cards", () => {
+    const corpseStrike = card("strike", "corpse-strike");
+    const corpse = player("east", {
+      alive: false,
+      hp: 0,
+      revealed: true,
+      hand: [corpseStrike, card("evade", "corpse-evade")],
+    });
+    const game = state({ phase: "play", activePlayerId: "east" }, [
+      player("south"),
+      corpse,
+      player("north"),
+      player("west"),
+    ]);
+
+    expect(getPlayableCards(game, "east")).toEqual([]);
+    expect(getTargetOptions(game, "east", corpseStrike)).toEqual([]);
+    expect(playCard(game, "east", "corpse-strike", "south")).toBe(game);
+
+    const handedOff = endTurn(game, "east");
+    expect(handedOff.phase).toBe("prepare");
+    expect(handedOff.activePlayerId).toBe("north");
+  });
+
   it("completes deterministic all-bot games without stalling", () => {
     let completed = 0;
     for (let seed = 1; seed <= 8; seed += 1) {
@@ -1118,6 +1554,10 @@ describe("Ding Ding engine", () => {
           game = respondToDying(game, responder, salveUid);
         } else if (top?.kind === "skill") {
           game = respondToSkill(game, top.ownerId, chooseAiSkillDecision(game, top.ownerId));
+        } else if (top?.kind === "protect") {
+          game = respondToProtect(game, top.protectorId, chooseAiProtectResponse(game, top.protectorId));
+        } else if (top?.kind === "probe") {
+          game = respondToProbe(game, top.actorId, chooseAiProbeGuess(game, top.actorId));
         } else if (top?.kind === "delayed") {
           game = respondToDelayed(game, top.ownerId);
         } else if (top?.kind === "trick") {

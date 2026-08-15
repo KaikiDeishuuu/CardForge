@@ -8,7 +8,6 @@ import {
   activateSkill,
   advancePhase,
   changeDifficulty,
-  createInitialState,
   discardCards,
   distanceBetween,
   endTurn,
@@ -21,6 +20,8 @@ import {
   respondToDuel,
   respondToDying,
   respondToHorde,
+  respondToProbe,
+  respondToProtect,
   respondToSkill,
   respondToStrike,
   respondToTrick,
@@ -33,6 +34,8 @@ import {
   chooseAiHordeResponse,
   chooseAiMove,
   chooseAiNullifyResponse,
+  chooseAiProbeGuess,
+  chooseAiProtectResponse,
   chooseAiSkillDecision,
   chooseAiStrikeResponse,
   chooseAiVolleyResponse,
@@ -41,13 +44,14 @@ import { IDENTITY_NAMES, WINNER_COPY } from "./domain/data";
 import { HERO_CATALOG, type HeroId } from "./domain/heroes";
 import { DING_SAVE_SCHEMA_VERSION, restoreDingRootState, serializeDingRootState } from "./domain/persistence";
 import {
+  chooseDingMatchHero,
   createDefaultDingRootState,
   dismissDingMatch,
-  startDingMatch,
+  startDingMatchWithHeroDraft,
   updateActiveDingMatch,
   type DingRootState,
 } from "./domain/session";
-import type { DingCard, DingDifficulty, DingPlayer, DingState, PlayerId, ResolutionFrame } from "./domain/types";
+import type { DingCard, DingDifficulty, DingPlayer, DingState, IdentityId, PlayerId, ResolutionFrame } from "./domain/types";
 import "./dingding.css";
 
 const SEAT_LAYOUT: Readonly<Record<PlayerId, string>> = {
@@ -114,6 +118,46 @@ const DIFFICULTY_OPTIONS: ReadonlyArray<{ id: DingDifficulty; description: strin
   { id: "tactician", description: "使用身份信念选择目标，更主动控制延时牌与主动技。" },
 ];
 
+function DingHeroDraft({ options, onChoose, onExit }: {
+  options: readonly HeroId[];
+  onChoose: (heroId: HeroId) => void;
+  onExit: () => void;
+}) {
+  const focusRef = useModalFocus({
+    active: true,
+    initialFocus: ".ding-draft__heroes button",
+    onDismiss: onExit,
+  });
+  return (
+    <div ref={focusRef} className="ding-modal" role="dialog" aria-modal="true" aria-labelledby="ding-draft-title" tabIndex={-1}>
+      <article className="ding-draft">
+        <small>DING HERO DRAFT</small>
+        <h2 id="ding-draft-title">三选一 · 选择武将</h2>
+        <p>身份仍然随机分配。三名 AI 会从其余六名武将中补位，未展示的武将本局不会出现。</p>
+        <div className="ding-draft__heroes">
+          {options.map((heroId) => {
+            const hero = HERO_CATALOG[heroId];
+            return (
+              <button
+                key={heroId}
+                type="button"
+                onClick={() => onChoose(heroId)}
+                aria-label={`选择武将${hero.name}`}
+              >
+                <b>{hero.name}</b>
+                <i>{hero.title} · {hero.skillName}</i>
+                <span>{hero.description}</span>
+                <em>{hero.maxHp} 体力</em>
+              </button>
+            );
+          })}
+        </div>
+        <button type="button" className="ding-draft__exit" onClick={onExit}>返回大厅</button>
+      </article>
+    </div>
+  );
+}
+
 function phaseLabel(phase: DingState["phase"]): string {
   switch (phase) {
     case "prepare": return "准备";
@@ -135,6 +179,8 @@ function frameLabel(frame: ResolutionFrame, state: DingState): string {
     case "duel": return "约斗";
     case "horde": return "合围";
     case "volley": return "齐射";
+    case "protect": return "护主";
+    case "probe": return "刺探";
     case "trick":
       return frame.cardType === "nullify"
         ? "无懈"
@@ -155,6 +201,7 @@ function Seat({ player, active, targetable, delayedCards, onTarget, onInspect, s
   const hero = HERO_CATALOG[player.heroId as HeroId];
   const equipment = [
     player.equipment.weapon,
+    player.equipment.armor,
     player.equipment.minusHorse,
     player.equipment.plusHorse,
   ].filter((card): card is DingCard => Boolean(card));
@@ -195,11 +242,13 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
     const base = restored ?? createDefaultDingRootState();
     return base.activeMatch
       ? base
-      : startDingMatch(base, createInitialState(Math.random, base.preferences.difficulty));
+      : startDingMatchWithHeroDraft(base, base.preferences.difficulty, Math.random);
   }, [restored]);
   const [root, setRoot] = useState<DingRootState>(initialRoot);
   const state = root.activeMatch!.state;
-  const [showRules, setShowRules] = useState(restored === undefined);
+  const heroDraft = root.activeMatch?.heroDraft;
+  const [showRules, setShowRules] = useState(false);
+  const [showRulesAfterDraft, setShowRulesAfterDraft] = useState(restored === undefined);
   function transition(update: (current: DingState) => DingState) {
     setRoot((current) => {
       const active = current.activeMatch;
@@ -215,6 +264,8 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
   const [discardSelection, setDiscardSelection] = useState<readonly string[]>([]);
   const [skillCostUid, setSkillCostUid] = useState<string>();
   const [skillTargetId, setSkillTargetId] = useState<PlayerId>();
+  const [protectCardUid, setProtectCardUid] = useState<string>();
+  const [probeGuess, setProbeGuess] = useState<IdentityId>();
   const [notice, setNotice] = useState<string>();
   const [saveBlocked, setSaveBlocked] = useState(Boolean(persistence?.restored && !restored));
   const [restoredNotice, setRestoredNotice] = useState(Boolean(restored));
@@ -253,7 +304,7 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
     ? HERO_CATALOG[pendingSkillOwner.heroId as HeroId]?.activeSkill
     : undefined;
   const pendingSkillNeedsCost = pendingSkillDefinition?.cost.kind === "discard";
-  const pendingSkillNeedsTarget = pendingSkillDefinition?.target === "wounded";
+  const pendingSkillNeedsTarget = pendingSkillDefinition ? pendingSkillDefinition.target !== "self" : false;
   const pendingSkillConfirmReady = (!pendingSkillNeedsCost || Boolean(skillCostUid))
     && (!pendingSkillNeedsTarget || Boolean(skillTargetId));
   const pendingTrick = stackTop?.kind === "trick" ? stackTop : undefined;
@@ -261,6 +312,8 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
   const pendingHorde = stackTop?.kind === "horde" ? stackTop : undefined;
   const pendingVolley = stackTop?.kind === "volley" ? stackTop : undefined;
   const pendingDelayed = stackTop?.kind === "delayed" ? stackTop : undefined;
+  const pendingProtect = stackTop?.kind === "protect" ? stackTop : undefined;
+  const pendingProbe = stackTop?.kind === "probe" ? stackTop : undefined;
   const dyingResponder = pendingDying ? pendingDying.responders[pendingDying.cursor] : undefined;
   const trickResponder = pendingTrick?.awaitingResponse ? pendingTrick.responders[pendingTrick.cursor] : undefined;
   const duelResponder = pendingDuel?.turnId;
@@ -277,20 +330,25 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
   const humanRespondingDuel = duelResponder === human.id;
   const humanRespondingHorde = hordeResponder === human.id;
   const humanRespondingVolley = volleyResponder === human.id;
-  const overlayOpen = showRules || showLog || showProfile || state.status === "finished";
+  const humanRespondingProtect = pendingProtect?.protectorId === human.id;
+  const humanRespondingProbe = pendingProbe?.actorId === human.id;
+  const overlayOpen = showRules || showLog || showProfile || state.status === "finished" || Boolean(heroDraft);
   const pendingHumanResponse = humanRespondingStrike
     || humanRespondingDying
     || humanRespondingSkill
     || humanRespondingTrick
     || humanRespondingDuel
     || humanRespondingHorde
-    || humanRespondingVolley;
+    || humanRespondingVolley
+    || humanRespondingProtect
+    || humanRespondingProbe;
 
   const shouldAutomate = state.status === "playing"
     && !overlayOpen
     && !pendingHumanResponse
     && (
       state.stack.length > 0
+      || !active.alive
       || active.controller === "ai"
       || (active.id === human.id && state.phase !== "play" && !humanDiscarding)
     );
@@ -347,6 +405,32 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
           const pending = current.stack.at(-1);
           if (current.revision !== expectedRevision || pending?.kind !== "delayed") return current;
           return respondToDelayed(current, pending.ownerId);
+        });
+      }, playbackDelay(560, playbackSpeed));
+      return () => window.clearTimeout(timer);
+    }
+
+    if (pendingProtect && pendingProtect.protectorId !== human.id) {
+      const cardUid = chooseAiProtectResponse(state, pendingProtect.protectorId);
+      const timer = window.setTimeout(() => {
+        playSound(cardUid ? "card" : "tap");
+        transition((current) => {
+          const pending = current.stack.at(-1);
+          if (current.revision !== expectedRevision || pending?.kind !== "protect") return current;
+          return respondToProtect(current, pending.protectorId, cardUid);
+        });
+      }, playbackDelay(560, playbackSpeed));
+      return () => window.clearTimeout(timer);
+    }
+
+    if (pendingProbe && pendingProbe.actorId !== human.id) {
+      const guess = chooseAiProbeGuess(state, pendingProbe.actorId);
+      const timer = window.setTimeout(() => {
+        playSound(guess ? "card" : "tap");
+        transition((current) => {
+          const pending = current.stack.at(-1);
+          if (current.revision !== expectedRevision || pending?.kind !== "probe") return current;
+          return respondToProbe(current, pending.actorId, guess);
         });
       }, playbackDelay(560, playbackSpeed));
       return () => window.clearTimeout(timer);
@@ -410,6 +494,11 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
     const timer = window.setTimeout(() => {
       transition((current) => {
         if (current.revision !== expectedRevision || current.status !== "playing") return current;
+        const currentActor = current.players.find((player) => player.id === current.activePlayerId);
+        if (!currentActor?.alive) {
+          playSound("tap");
+          return advancePhase(current);
+        }
         if (current.phase === "play" && current.activePlayerId === actorId && current.stack.length === 0) {
           const move = chooseAiMove(current, actorId);
           if (move.kind === "skill") {
@@ -432,7 +521,7 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
       });
     }, playbackDelay(420, playbackSpeed));
     return () => window.clearTimeout(timer);
-  }, [duelResponder, dyingResponder, hordeResponder, human.id, pendingDelayed, pendingDuel, pendingDying, pendingHorde, pendingSkill, pendingStrike, pendingTrick, pendingVolley, playSound, playbackSpeed, shouldAutomate, state, trickResponder, volleyResponder]);
+  }, [duelResponder, dyingResponder, hordeResponder, human.id, pendingDelayed, pendingDuel, pendingDying, pendingHorde, pendingProbe, pendingProtect, pendingSkill, pendingStrike, pendingTrick, pendingVolley, playSound, playbackSpeed, shouldAutomate, state, trickResponder, volleyResponder]);
 
   useEffect(() => {
     if (!persistence || saveBlocked) return;
@@ -507,16 +596,26 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
   function restart() {
     setRoot((current) => {
       const base = current.activeMatch?.resultRecorded ? dismissDingMatch(current) : current;
-      return startDingMatch(base, createInitialState(Math.random, base.preferences.difficulty));
+      return startDingMatchWithHeroDraft(base, base.preferences.difficulty, Math.random);
     });
+    setShowRulesAfterDraft(false);
     setSelectedCardUid(undefined);
     setSelectedTargetId(undefined);
     setDiscardSelection([]);
     setSkillCostUid(undefined);
     setSkillTargetId(undefined);
+    setProtectCardUid(undefined);
+    setProbeGuess(undefined);
     setShowRules(false);
     setResultLogMode("key");
     setNotice(undefined);
+    playSound("card");
+  }
+
+  function selectDraftHero(heroId: HeroId) {
+    setRoot((current) => chooseDingMatchHero(current, heroId));
+    setShowRules(showRulesAfterDraft);
+    setShowRulesAfterDraft(false);
     playSound("card");
   }
 
@@ -531,7 +630,11 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
     ? `${state.players.find((player) => player.id === pendingDelayed.ownerId)?.displayName}的「${state.delayedTricks[pendingDelayed.ownerId]?.find((entry) => entry.card.id === pendingDelayed.cardUid)?.card.name ?? "延时锦囊"}」正在判定。`
     : pendingStrike
     ? `${state.players.find((player) => player.id === pendingStrike.actorId)?.displayName}的「刺击」等待响应。`
-    : pendingDying
+    : pendingProtect
+      ? `${state.players.find((player) => player.id === pendingProtect.targetId)?.displayName}受到刺击，辅臣可以弃 1 张手牌护主。`
+      : pendingProbe
+        ? `${state.players.find((player) => player.id === pendingProbe.actorId)?.displayName}正在猜测${state.players.find((player) => player.id === pendingProbe.targetId)?.displayName}的身份。`
+        : pendingDying
       ? `${state.players.find((player) => player.id === pendingDying.targetId)?.displayName}正在濒死求援。`
       : pendingSkill
         ? `${state.players.find((player) => player.id === pendingSkill.ownerId)?.displayName}正在决定${HERO_CATALOG[state.players.find((player) => player.id === pendingSkill.ownerId)?.heroId as HeroId]?.activeSkill?.name ?? "主动技"}的目标。`
@@ -570,6 +673,8 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
           <button type="button" onClick={resetUnreadableSave}>重置旧存档并启用保存</button>
         </div>
       )}
+
+      {heroDraft && <DingHeroDraft options={heroDraft.options} onChoose={selectDraftHero} onExit={onExit} />}
 
       <section className="ding-table" aria-label="四席定鼎牌桌">
         <div className="ding-board">
@@ -650,7 +755,7 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
               {pendingSkillNeedsTarget && (
                 <div className="ding-skill-panel">
                   <div className="ding-skill-targets" aria-label="选择技能目标">
-                    <small>选择回复体力的角色</small>
+                    <small>{pendingSkillDefinition?.effect.kind === "heal-1" || pendingSkillDefinition?.effect.kind === "draw-target" ? "选择获得回复 / 摸牌的角色" : pendingSkillDefinition?.effect.kind === "damage" ? "选择受到伤害的角色" : pendingSkillDefinition?.effect.kind === "discard-target" ? "选择弃置手牌的角色" : "选择技能目标"}</small>
                     <div>
                       {pendingSkill.targetIds.map((targetId) => {
                         const target = state.players.find((player) => player.id === targetId)!;
@@ -687,7 +792,7 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
                     transition((current) => respondToSkill(current, human.id, { cardUid, targetId }));
                     setSkillCostUid(undefined);
                     setSkillTargetId(undefined);
-                    playSound(pendingSkillDefinition?.effect.kind === "draw" ? "card" : "heal");
+                    playSound(pendingSkillDefinition?.effect.kind === "draw" || pendingSkillDefinition?.effect.kind === "draw-discard" ? "card" : "heal");
                   }}
                 >确认发动</button>
                 <button type="button" onClick={() => {
@@ -704,10 +809,10 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
               <div>
                 <small>需要响应 · 刺击</small>
                 <strong>{state.players.find((player) => player.id === pendingStrike.actorId)?.displayName}的「刺击」正指向你</strong>
-                <p>打出「闪避」抵消伤害，或选择承受。</p>
+                <p>{pendingStrike.unavoidable ? "此击无法被「闪避」响应，只能承受。" : "打出「闪避」抵消伤害，或选择承受。"}</p>
               </div>
               <div className="ding-response__actions">
-                {human.hand.filter((card) => card.type === "evade").map((card) => (
+                {!pendingStrike.unavoidable && human.hand.filter((card) => card.type === "evade").map((card) => (
                   <button key={card.id} type="button" onClick={() => {
                     transition((current) => respondToStrike(current, human.id, card.id));
                     playSound("card");
@@ -717,6 +822,89 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
                   transition((current) => respondToStrike(current, human.id));
                   playSound("hit");
                 }}>承受攻击</button>
+              </div>
+            </>
+          ) : null}
+          {humanRespondingProtect && pendingProtect ? (
+            <>
+              <div>
+                <small>辅臣护主</small>
+                <strong>主君受到刺击</strong>
+                <p>你可以弃置任意 1 张手牌，为主君抵挡 1 点伤害；弃置会公开你的辅臣身份。</p>
+              </div>
+              <div className="ding-skill-panel">
+                <div className="ding-skill-cost" aria-label="选择护主弃置的手牌">
+                  <small>选择一张手牌（也可以放弃）</small>
+                  <div>
+                    {human.hand.map((card) => (
+                      <button
+                        key={card.id}
+                        type="button"
+                        className={`ding-card ding-card--${card.type} ${protectCardUid === card.id ? "is-selected" : ""}`}
+                        style={{ "--card-tone": card.tone } as CSSProperties}
+                        onClick={() => {
+                          setProtectCardUid(protectCardUid === card.id ? undefined : card.id);
+                          playSound("tap");
+                        }}
+                        aria-pressed={protectCardUid === card.id}
+                        aria-label={`选择「${card.name}」护主`}
+                      >
+                        <span className="ding-card__symbol" aria-hidden="true">{card.symbol}</span>
+                        <strong>{card.name}</strong>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="ding-response__actions">
+                <button
+                  type="button"
+                  disabled={!protectCardUid}
+                  onClick={() => {
+                    transition((current) => respondToProtect(current, human.id, protectCardUid));
+                    setProtectCardUid(undefined);
+                    playSound("card");
+                  }}
+                >弃置护主</button>
+                <button type="button" onClick={() => {
+                  transition((current) => respondToProtect(current, human.id));
+                  setProtectCardUid(undefined);
+                  playSound("tap");
+                }}>不护主</button>
+              </div>
+            </>
+          ) : null}
+          {humanRespondingProbe && pendingProbe ? (
+            <>
+              <div>
+                <small>刺探身份</small>
+                <strong>猜测{state.players.find((player) => player.id === pendingProbe.targetId)?.displayName}的身份</strong>
+                <p>猜对会公开其身份并摸两张牌；猜错你会随机弃置一张手牌。</p>
+              </div>
+              <div className="ding-response__actions">
+                {(["loyalist", "rebel", "renegade"] as const).map((identity) => (
+                  <button
+                    key={identity}
+                    type="button"
+                    className={probeGuess === identity ? "is-selected" : ""}
+                    onClick={() => {
+                      setProbeGuess(identity);
+                      playSound("tap");
+                    }}
+                    aria-pressed={probeGuess === identity}
+                  >{IDENTITY_NAMES[identity]}</button>
+                ))}
+              </div>
+              <div className="ding-response__actions">
+                <button
+                  type="button"
+                  disabled={!probeGuess}
+                  onClick={() => {
+                    transition((current) => respondToProbe(current, human.id, probeGuess));
+                    setProbeGuess(undefined);
+                    playSound("card");
+                  }}
+                >确认猜测</button>
               </div>
             </>
           ) : null}
@@ -938,16 +1126,16 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
               <span><b>回合</b>准备 → 摸 2 张 → 出牌 → 弃牌到手牌上限（等于当前体力）</span>
               <span><b>刺击</b>攻击范围内每回合一次；目标可出「闪避」</span>
               <span><b>疗元</b>受伤时自疗，或在任何人濒死时救援</span>
-              <span><b>锦囊</b>聚势/拆解/牵袭/约斗/合围/齐射/同袍先询问「无懈可击」，再进结算栈</span>
+              <span><b>锦囊</b>聚势/拆解/牵袭/约斗/合围/齐射/同袍/刺探先询问「无懈可击」，再进结算栈；拆解与牵袭可作用于手牌、装备或判定区</span>
               <span><b>延时</b>断锋/困阵/焚营进入判定区，在判定阶段翻牌顶判定后结算</span>
               <span><b>无懈</b>抵消一张锦囊；无懈本身可被另一张无懈反制，层层嵌套后自栈顶结算</span>
               <span><b>约斗</b>目标先出「刺击」，双方轮流；先打不出的一方受对方 1 点伤害</span>
               <span><b>合围/齐射</b>其他角色依次需出「刺击」/「闪避」，否则受 1 点伤害</span>
-              <span><b>武将</b>每人随机一名不重复的原创武将，技能在回合、伤害、濒死或锦囊结算时自动触发</span>
-              <span><b>距离</b>相邻座位为 1；赤影 -1、磐影 +1、长锋射程 2、穿云射程 3</span>
+              <span><b>武将</b>开局从三名武将中选一，AI 从其余武将补位；武将体力为 3 或 4，主君 +1，技能在回合、伤害、濒死或锦囊结算时触发</span>
+              <span><b>距离</b>相邻座位为 1；赤影 -1、磐影 +1、长锋射程 2、穿云射程 3；犀甲每回合首次受伤 -1</span>
               <span><b>胜负</b>主君死时若只剩流谋则流谋胜，否则叛锋胜；叛锋与流谋全灭则主君方胜</span>
-              <span><b>奖惩</b>击退叛锋摸 3 张；叛锋击退主君摸 3 张；流谋不取奖惩；主君误杀辅臣弃光手牌</span>
-              <span><b>护主</b>主君被刺击时，存活辅臣可弃 1 张手牌抵挡 1 点伤害</span>
+              <span><b>奖惩</b>击退叛锋摸 3 张；流谋不取奖惩；主君误杀辅臣弃光手牌。主君倒下即终局</span>
+              <span><b>护主</b>主君被刺击且未闪避时，存活辅臣可自选是否弃 1 张手牌抵挡 1 点伤害；弃牌会公开辅臣身份</span>
               <span><b>过载</b>第 24 轮起，每跨过一整轮对存活角色造成递增真实伤害，但不会致死</span>
             </div>
             <p className="ding-rules__scope">M4 在 M3 基础上加入辅臣护主与第 24 轮起的牌局过载；见习/标准/战术三档 AI 与身份信念也已启用。</p>

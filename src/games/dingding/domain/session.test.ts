@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { createInitialState } from "./engine";
 import {
+  chooseDingMatchHero,
   createDefaultDingRootState,
   dismissDingMatch,
   resetDingProfile,
   startDingMatch,
+  startDingMatchWithHeroDraft,
   updateActiveDingMatch,
 } from "./session";
+import type { HeroId } from "./heroes";
 import type { DingState } from "./types";
 
 const fixedRandom = () => 0.37;
@@ -66,6 +69,30 @@ describe("Ding session archive", () => {
     const reset = resetDingProfile(dismissed);
     expect(reset.lifetimeProfile.gamesPlayed).toBe(0);
     expect(reset.lifetimeProfile.identityRecords.rebel).toEqual({ games: 0, wins: 0 });
+  });
+
+  it("starts a three-choice hero draft and swaps only the human hero on selection", () => {
+    const root = startDingMatchWithHeroDraft(createDefaultDingRootState(), "standard", fixedRandom);
+    const draft = root.activeMatch?.heroDraft;
+    const players = root.activeMatch?.state.players ?? [];
+    expect(draft?.options).toHaveLength(3);
+    expect(new Set(draft?.options).size).toBe(3);
+
+    const human = players.find((player) => player.controller === "human")!;
+    expect(human.heroId).toBe(draft!.options[0]);
+    for (const ai of players.filter((player) => player.controller === "ai")) {
+      expect(draft!.options.includes(ai.heroId as HeroId)).toBe(false);
+    }
+
+    const chosen = root.activeMatch!.heroDraft!.options[1];
+    const selected = chooseDingMatchHero(root, chosen);
+    const selectedPlayers = selected.activeMatch!.state.players;
+    expect(selected.activeMatch?.heroDraft).toBeUndefined();
+    expect(selectedPlayers.find((player) => player.controller === "human")!.heroId).toBe(chosen);
+    for (const ai of selectedPlayers.filter((player) => player.controller === "ai")) {
+      expect(ai.heroId).not.toBe(chosen);
+    }
+    expect(selected.activeMatch!.state.revision).toBe(1);
   });
 
   it("does not record a loss as a win and counts the human identity independently of winner text", () => {

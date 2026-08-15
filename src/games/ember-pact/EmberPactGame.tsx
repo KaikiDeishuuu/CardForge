@@ -164,7 +164,10 @@ export function EmberPactGame({ onExit, persistence }: GameRuntimeProps) {
   useEffect(() => {
     if (!persistence || saveBlocked || (root.revision === 0 && !persistence.restored)) return;
     const saved = persistence.save(PACT_SAVE_SCHEMA_VERSION, root.revision, serializePactRootState(root));
-    if (saved) return;
+    if (saved) {
+      const timer = window.setTimeout(() => setSaveUnavailable(false), 0);
+      return () => window.clearTimeout(timer);
+    }
     const timer = window.setTimeout(() => setSaveUnavailable(true), 0);
     return () => window.clearTimeout(timer);
   }, [persistence, root, saveBlocked]);

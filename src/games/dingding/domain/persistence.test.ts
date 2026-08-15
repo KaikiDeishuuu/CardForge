@@ -9,7 +9,7 @@ import {
   serializeDingRootState,
   serializeDingState,
 } from "./persistence";
-import { createDefaultDingRootState, startDingMatch } from "./session";
+import { createDefaultDingRootState, startDingMatch, startDingMatchWithHeroDraft } from "./session";
 import type { DingPlayer, DingState } from "./types";
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };
@@ -293,6 +293,16 @@ function craftedHordeState(): DingState {
 }
 
 describe("Ding Ding persistence", () => {
+  it("round-trips a pending hero draft in the v8 root archive", () => {
+    const initial = startDingMatchWithHeroDraft(createDefaultDingRootState(), "standard", () => 0.37);
+    const restored = restoreDingRootState(
+      DING_SAVE_SCHEMA_VERSION,
+      JSON.parse(JSON.stringify(serializeDingRootState(initial))),
+    );
+    expect(restored).toEqual(initial);
+    expect(restored?.activeMatch?.heroDraft?.options).toHaveLength(3);
+  });
+
   it("round-trips the v8 root archive and active table", () => {
     const initial = createInitialState(() => 0.37);
     const root = startDingMatch(createDefaultDingRootState(), initial);
@@ -352,6 +362,11 @@ describe("Ding Ding persistence", () => {
     const strikeFrame = boosted.stack[0] as Extract<DingState["stack"][number], { kind: "strike" }>;
     boosted.stack = [{ ...strikeFrame, damage: 2 }, ...boosted.stack.slice(1)];
     expect(restoreDingState(boosted)).toEqual(boosted);
+
+    const unavoidable = JSON.parse(JSON.stringify(serializeDingState(pending))) as MutableDingState;
+    const baseFrame = unavoidable.stack[0] as Extract<DingState["stack"][number], { kind: "strike" }>;
+    unavoidable.stack = [{ ...baseFrame, unavoidable: true }, ...unavoidable.stack.slice(1)];
+    expect(restoreDingState(unavoidable)).toEqual(unavoidable);
   });
 
   it("round-trips a nested trick stack with a suspended frame and a nullify frame", () => {
@@ -366,6 +381,59 @@ describe("Ding Ding persistence", () => {
     const restored = restoreDingState(JSON.parse(JSON.stringify(serializeDingState(crafted))));
     expect(restored).toEqual(crafted);
     expect(restored?.stack.at(-1)).toMatchObject({ kind: "skill", skillId: "qingnang" });
+  });
+
+  it("round-trips an other-target active skill frame", () => {
+    const deck = buildDeck();
+    const cost = deck.find((card) => card.type === "strike")!;
+    const players: DingPlayer[] = [
+      {
+        id: "south", displayName: "你", controller: "human", seat: 0,
+        identity: "lord", revealed: true, hp: 5, maxHp: 5, alive: true,
+        hand: [cost], equipment: {}, heroId: "chongzhen",
+        skillFlags: { "active:xianzhen": true },
+      },
+      {
+        id: "east", displayName: "东座", controller: "ai", seat: 1,
+        identity: "rebel", revealed: false, hp: 4, maxHp: 4, alive: true,
+        hand: [], equipment: {}, heroId: HERO_IDS[1], skillFlags: {},
+      },
+      {
+        id: "north", displayName: "北座", controller: "ai", seat: 2,
+        identity: "loyalist", revealed: false, hp: 4, maxHp: 4, alive: true,
+        hand: [], equipment: {}, heroId: HERO_IDS[2], skillFlags: {},
+      },
+      {
+        id: "west", displayName: "西座", controller: "ai", seat: 3,
+        identity: "renegade", revealed: false, hp: 4, maxHp: 4, alive: true,
+        hand: [], equipment: {}, heroId: HERO_IDS[3], skillFlags: {},
+      },
+    ];
+    const crafted: DingState = {
+      revision: 6,
+      status: "playing",
+      phase: "play",
+      difficulty: "standard",
+      turnNumber: 1,
+      activePlayerId: "south",
+      players,
+      deck: deck.filter((card) => card.id !== cost.id),
+      discard: [],
+      delayedTricks: { south: [], east: [], north: [], west: [] },
+      strikeUsed: false,
+      stack: [{
+        kind: "skill",
+        ownerId: "south",
+        skillId: "xianzhen",
+        prompt: "选择一张「刺击」作为消耗，并选择一名角色造成 1 点伤害。",
+        targetIds: ["east"],
+      }],
+      log: [],
+      rngSeed: 1,
+    };
+    const restored = restoreDingState(JSON.parse(JSON.stringify(serializeDingState(crafted))));
+    expect(restored).toEqual(crafted);
+    expect(restored?.stack.at(-1)).toMatchObject({ kind: "skill", skillId: "xianzhen", targetIds: ["east"] });
   });
 
   it("round-trips a self-target no-cost active skill frame with no target ids", () => {
@@ -387,6 +455,111 @@ describe("Ding Ding persistence", () => {
     const restored = restoreDingState(JSON.parse(JSON.stringify(serializeDingState(crafted))));
     expect(restored).toEqual(crafted);
     expect(restored?.stack.at(-1)).toMatchObject({ kind: "horde", cursor: 1 });
+  });
+
+  it("round-trips a protect decision frame", () => {
+    const deck = buildDeck();
+    const strike = deck.find((card) => card.type === "strike")!;
+    const cost = deck.find((card) => card.type === "evade")!;
+    const players: DingPlayer[] = [
+      {
+        id: "south", displayName: "你", controller: "human", seat: 0,
+        identity: "lord", revealed: true, hp: 5, maxHp: 5, alive: true,
+        hand: [], equipment: {}, heroId: HERO_IDS[0], skillFlags: {},
+      },
+      {
+        id: "east", displayName: "东座", controller: "ai", seat: 1,
+        identity: "rebel", revealed: false, hp: 4, maxHp: 4, alive: true,
+        hand: [], equipment: {}, heroId: HERO_IDS[1], skillFlags: {},
+      },
+      {
+        id: "north", displayName: "北座", controller: "ai", seat: 2,
+        identity: "loyalist", revealed: false, hp: 4, maxHp: 4, alive: true,
+        hand: [cost], equipment: {}, heroId: HERO_IDS[2], skillFlags: {},
+      },
+      {
+        id: "west", displayName: "西座", controller: "ai", seat: 3,
+        identity: "renegade", revealed: false, hp: 4, maxHp: 4, alive: true,
+        hand: [], equipment: {}, heroId: HERO_IDS[3], skillFlags: {},
+      },
+    ];
+    const crafted: DingState = {
+      revision: 7,
+      status: "playing",
+      phase: "play",
+      difficulty: "standard",
+      turnNumber: 1,
+      activePlayerId: "east",
+      players,
+      deck: deck.filter((card) => card.id !== strike.id && card.id !== cost.id),
+      discard: [strike],
+      delayedTricks: { south: [], east: [], north: [], west: [] },
+      strikeUsed: true,
+      stack: [{
+        kind: "protect",
+        actorId: "east",
+        targetId: "south",
+        protectorId: "north",
+        cardUid: strike.id,
+        damage: 1,
+      }],
+      log: [],
+      rngSeed: 1,
+    };
+    const restored = restoreDingState(JSON.parse(JSON.stringify(serializeDingState(crafted))));
+    expect(restored).toEqual(crafted);
+    expect(restored?.stack.at(-1)).toMatchObject({ kind: "protect", protectorId: "north" });
+  });
+
+  it("round-trips a probe decision frame", () => {
+    const deck = buildDeck();
+    const probe = deck.find((card) => card.type === "probe")!;
+    const players: DingPlayer[] = [
+      {
+        id: "south", displayName: "你", controller: "human", seat: 0,
+        identity: "lord", revealed: true, hp: 5, maxHp: 5, alive: true,
+        hand: [], equipment: {}, heroId: HERO_IDS[0], skillFlags: {},
+      },
+      {
+        id: "east", displayName: "东座", controller: "ai", seat: 1,
+        identity: "rebel", revealed: false, hp: 4, maxHp: 4, alive: true,
+        hand: [], equipment: {}, heroId: HERO_IDS[1], skillFlags: {},
+      },
+      {
+        id: "north", displayName: "北座", controller: "ai", seat: 2,
+        identity: "loyalist", revealed: false, hp: 4, maxHp: 4, alive: true,
+        hand: [], equipment: {}, heroId: HERO_IDS[2], skillFlags: {},
+      },
+      {
+        id: "west", displayName: "西座", controller: "ai", seat: 3,
+        identity: "renegade", revealed: false, hp: 4, maxHp: 4, alive: true,
+        hand: [], equipment: {}, heroId: HERO_IDS[3], skillFlags: {},
+      },
+    ];
+    const crafted: DingState = {
+      revision: 9,
+      status: "playing",
+      phase: "play",
+      difficulty: "standard",
+      turnNumber: 1,
+      activePlayerId: "south",
+      players,
+      deck: deck.filter((card) => card.id !== probe.id),
+      discard: [probe],
+      delayedTricks: { south: [], east: [], north: [], west: [] },
+      strikeUsed: false,
+      stack: [{
+        kind: "probe",
+        actorId: "south",
+        targetId: "east",
+        cardUid: probe.id,
+      }],
+      log: [],
+      rngSeed: 1,
+    };
+    const restored = restoreDingState(JSON.parse(JSON.stringify(serializeDingState(crafted))));
+    expect(restored).toEqual(crafted);
+    expect(restored?.stack.at(-1)).toMatchObject({ kind: "probe", targetId: "east" });
   });
 
   it("accepts frame cards that were reshuffled from the discard into the draw pile", () => {

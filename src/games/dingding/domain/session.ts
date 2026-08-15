@@ -1,4 +1,5 @@
-import type { HeroId } from "./heroes";
+import { HERO_IDS, type HeroId } from "./heroes";
+import { chooseHero, createInitialState } from "./engine";
 import type { DingDifficulty, DingState, IdentityId, MatchWinner } from "./types";
 
 export interface DingPreferences {
@@ -22,9 +23,16 @@ export interface DingLifetimeProfile {
   readonly heroRecords: Readonly<Record<HeroId, DingHeroRecord>>;
 }
 
+export interface DingHeroDraft {
+  /** 开局展示给人类玩家的三张候选武将。 */
+  readonly options: readonly HeroId[];
+}
+
 export interface ActiveDingMatch {
   readonly state: DingState;
   readonly resultRecorded: boolean;
+  /** 本局尚未完成的人类选将；选完后清除。 */
+  readonly heroDraft?: DingHeroDraft;
 }
 
 export interface DingRootState {
@@ -58,6 +66,17 @@ export function createEmptyDingProfile(): DingLifetimeProfile {
       cleareye: emptyRecord(),
       scrollkeeper: emptyRecord(),
       nightowl: emptyRecord(),
+      xuanji: emptyRecord(),
+      jinyu: emptyRecord(),
+      yueji: emptyRecord(),
+      liexiao: emptyRecord(),
+      wufeng: emptyRecord(),
+      chongzhen: emptyRecord(),
+      haoke: emptyRecord(),
+      youjiao: emptyRecord(),
+      junshi: emptyRecord(),
+      panwei: emptyRecord(),
+      fubi: emptyRecord(),
     },
   };
 }
@@ -93,6 +112,54 @@ function recordFinishedMatch(profile: DingLifetimeProfile, state: DingState): Di
       ...profile.heroRecords,
       [human.heroId as HeroId]: { games: hero.games + 1, wins: hero.wins + (won ? 1 : 0) },
     },
+  };
+}
+
+function shuffled<T>(items: readonly T[], random: () => number): T[] {
+  const result = [...items];
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(random() * (index + 1));
+    [result[index], result[swapIndex]] = [result[swapIndex], result[index]];
+  }
+  return result;
+}
+
+export function createHeroDraftOptions(random: () => number = Math.random): readonly HeroId[] {
+  return shuffled(HERO_IDS, random).slice(0, 3);
+}
+
+/**
+ * 开始一局带人类三选一的定鼎：候选武将之外的 6 名分配给三名 AI，
+ * 人类席先放第一候选，选将完成后原地替换。
+ */
+export function startDingMatchWithHeroDraft(
+  root: DingRootState,
+  difficulty: DingDifficulty,
+  random: () => number = Math.random,
+): DingRootState {
+  if (root.activeMatch) return root;
+  const options = createHeroDraftOptions(random);
+  const excluded = new Set(options);
+  const aiHeroIds = shuffled(HERO_IDS.filter((heroId) => !excluded.has(heroId)), random);
+  const state = createInitialState(random, difficulty, [options[0], ...aiHeroIds.slice(0, 3)]);
+  const base = { ...root, preferences: { ...root.preferences, difficulty } };
+  const started = startDingMatch(base, state);
+  if (!started.activeMatch) return started;
+  return {
+    ...started,
+    activeMatch: { ...started.activeMatch, heroDraft: { options } },
+  };
+}
+
+export function chooseDingMatchHero(root: DingRootState, heroId: HeroId): DingRootState {
+  const active = root.activeMatch;
+  if (!active?.heroDraft || active.resultRecorded || !active.heroDraft.options.includes(heroId)) return root;
+  const state = chooseHero(active.state, "south", heroId);
+  if (state === active.state) return root;
+  return {
+    ...root,
+    revision: root.revision + 1,
+    activeMatch: { ...active, state, heroDraft: undefined },
   };
 }
 

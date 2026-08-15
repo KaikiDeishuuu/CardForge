@@ -126,7 +126,10 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
     // 产生的新局在有旧档时会在这里直接覆盖它。
     if (state.revision === 0 && !persistence.restored) return;
     const saved = persistence.save(GUANDAN_SAVE_SCHEMA_VERSION, state.revision, serializeGuandanState(state));
-    if (saved) return;
+    if (saved) {
+      const timer = window.setTimeout(() => setSaveUnavailable(false), 0);
+      return () => window.clearTimeout(timer);
+    }
     const timer = window.setTimeout(() => setSaveUnavailable(true), 0);
     return () => window.clearTimeout(timer);
   }, [persistence, saveBlocked, state]);

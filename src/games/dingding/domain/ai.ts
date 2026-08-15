@@ -1,6 +1,6 @@
 import { getActiveSkillUse, getPlayer, getPlayableCards, getTargetOptions, requiredDiscards } from "./engine";
-import { heroOf } from "./heroes";
-import type { DingAiMove, DingCard, DingDifficulty, DingPlayer, DingState, PendingTrick, PlayerId } from "./types";
+import { heroOf, type ActiveSkillEffect } from "./heroes";
+import type { DingAiMove, DingCard, DingDifficulty, DingPlayer, DingState, IdentityId, PendingTrick, PlayerId } from "./types";
 
 export interface DingIdentityBelief {
   readonly lord: number;
@@ -18,9 +18,24 @@ function exactBelief(identity: DingPlayer["identity"]): DingIdentityBelief {
   };
 }
 
+/** 从公开日志中提取的身份信号：护主、援救/援护主君都会被记住。 */
+function actionIdentityClues(state: DingState, targetId: PlayerId): Pick<DingIdentityBelief, "loyalist" | "rebel" | "renegade"> {
+  const target = getPlayer(state.players, targetId);
+  const lord = state.players.find((player) => player.identity === "lord");
+  const clues = { loyalist: 0, rebel: 0, renegade: 0 };
+  if (!lord) return clues;
+  for (const entry of state.log) {
+    if (entry.text.includes(`${target.displayName}弃置`) && entry.text.includes("护主")) clues.loyalist += 1.5;
+    if (entry.text.includes(`${target.displayName}用「疗元」援救`) && entry.text.includes(lord.displayName)) clues.loyalist += 0.8;
+    if (entry.text.includes(`${target.displayName}的「援护」生效`) && entry.text.includes(`${lord.displayName}回复`)) clues.loyalist += 0.7;
+    if (entry.text.includes(`${target.displayName}的「无懈可击」生效`) && entry.text.includes(lord.displayName)) clues.loyalist += 0.5;
+  }
+  return clues;
+}
+
 /**
- * 轻量身份信念：只使用观察者自己的身份、公开主君、已揭示身份与
- * 当前公开牌面压力，不读取任何隐藏身份。战术 AI 用它选择目标。
+ * 轻量身份信念：观察者自己的身份、公开主君、已揭示身份、当前牌面压力
+ * 与日志中的行动信号共同构成信念；不直接读取任何隐藏身份。
  */
 export function identityBelief(
   state: DingState,
@@ -50,6 +65,11 @@ export function identityBelief(
     rebel += 0.35;
     loyalist += 0.35;
   }
+
+  const clues = actionIdentityClues(state, target.id);
+  loyalist += clues.loyalist;
+  rebel += clues.rebel;
+  renegade += clues.renegade;
 
   const total = lord + loyalist + rebel + renegade;
   return { lord, loyalist: loyalist / total, rebel: rebel / total, renegade: renegade / total };
@@ -85,6 +105,23 @@ function tacticalTarget(state: DingState, actorId: PlayerId, options: readonly P
       || left.id.localeCompare(right.id))[0]?.id;
 }
 
+function chooseAiSkillTarget(
+  state: DingState,
+  actorId: PlayerId,
+  targetIds: readonly PlayerId[],
+  effectKind: ActiveSkillEffect["kind"],
+): PlayerId | undefined {
+  const actor = getPlayer(state.players, actorId);
+  const lord = state.players.find((player) => player.identity === "lord");
+  if (effectKind === "draw-target") {
+    if ((actor.identity === "lord" || actor.identity === "loyalist") && lord && targetIds.includes(lord.id)) return lord.id;
+    return targetIds
+      .map((id) => getPlayer(state.players, id))
+      .sort((left, right) => left.hp - right.hp || left.hand.length - right.hand.length || left.seat - right.seat)[0]?.id;
+  }
+  return tacticalTarget(state, actorId, targetIds);
+}
+
 const DISCARD_PRIORITY: Readonly<Record<DingCard["type"], number>> = {
   strike: 0,
   dismantle: 1,
@@ -97,7 +134,9 @@ const DISCARD_PRIORITY: Readonly<Record<DingCard["type"], number>> = {
   weapon: 8,
   "minus-horse": 8,
   "plus-horse": 9,
+  armor: 10,
   grove: 10,
+  probe: 10,
   "delay-play": 11,
   "delay-draw": 12,
   "delay-burn": 13,
@@ -187,19 +226,26 @@ export function chooseAiMove(
       if (selfWounded || (canHelpLord && lordWounded)) {
         return { kind: "skill", skillId: skill.id };
       }
+    } else if (skill.target === "other") {
+      const targetId = chooseAiSkillTarget(state, actorId, skillUse.targetIds, skill.effect.kind);
+      if (targetId) return { kind: "skill", skillId: skill.id };
     } else if (skill.cost.kind === "none") {
       return { kind: "skill", skillId: skill.id };
-    } else if (skill.effect.kind === "draw") {
+    } else if (skill.effect.kind === "draw" || skill.effect.kind === "draw-discard") {
       if (actor.hand.length <= 5) return { kind: "skill", skillId: skill.id };
     } else if (skill.effect.kind === "buff") {
       const enemiesAlive = state.players.some((player) => player.id !== actor.id && player.alive);
       if (skill.id === "pojun") {
+        if (actor.hand.filter((card) => card.type === "strike").length >= 2) return { kind: "skill", skillId: skill.id };
+      } else if (skill.id === "pojian") {
         if (actor.hand.filter((card) => card.type === "strike").length >= 2) return { kind: "skill", skillId: skill.id };
       } else if (skill.id === "jianbi") {
         if (actor.hp <= 3 || actor.hand.length >= 4) return { kind: "skill", skillId: skill.id };
       } else if (enemiesAlive && actor.hand.length >= 3) {
         return { kind: "skill", skillId: skill.id };
       }
+    } else if (skill.effect.kind === "reset-strike") {
+      if (actor.hand.filter((card) => card.type === "strike").length >= 2) return { kind: "skill", skillId: skill.id };
     }
   }
 
@@ -232,8 +278,23 @@ export function chooseAiMove(
     }
   }
 
-  const equipment = playable.find((card) => card.type === "weapon" || card.type === "minus-horse" || card.type === "plus-horse");
+  const equipment = playable.find((card) => card.type === "weapon" || card.type === "armor" || card.type === "minus-horse" || card.type === "plus-horse");
   if (equipment) return { kind: "play", cardUid: equipment.id, targetId: actor.id };
+
+  const probe = playable.find((card) => card.type === "probe");
+  if (probe) {
+    const options = getTargetOptions(state, actorId, probe);
+    const targetId = difficulty === "relaxed"
+      ? options[0]
+      : options
+        .map((id) => ({ id, belief: identityBelief(state, actorId, id) }))
+        .sort((left, right) =>
+          Math.max(left.belief.loyalist, left.belief.rebel, left.belief.renegade)
+          - Math.max(right.belief.loyalist, right.belief.rebel, right.belief.renegade)
+          || left.id.localeCompare(right.id),
+        )[0]?.id;
+    if (targetId) return { kind: "play", cardUid: probe.id, targetId };
+  }
 
   const duel = playable.find((card) => card.type === "duel");
   if (duel) {
@@ -300,6 +361,8 @@ export function chooseAiStrikeResponse(
   responderId: PlayerId,
   difficulty: DingDifficulty = state.difficulty,
 ): string | undefined {
+  const pending = state.stack.at(-1);
+  if (pending?.kind === "strike" && pending.unavoidable) return undefined;
   const responder = getPlayer(state.players, responderId);
   const evade = responder.hand.find((card) => card.type === "evade");
   if (!evade) return undefined;
@@ -351,6 +414,43 @@ export function chooseAiVolleyResponse(
   return chooseAiStrikeResponse(state, responderId, difficulty);
 }
 
+/**
+ * 辅臣护主决策：主君会被这一击击退时必救；否则见习档倾向不暴露身份，
+ * 标准档只在主君残血或自己手牌富余时出手，战术档更愿意弃低价值牌护主。
+ */
+export function chooseAiProtectResponse(
+  state: DingState,
+  protectorId: PlayerId,
+  difficulty: DingDifficulty = state.difficulty,
+): string | undefined {
+  const pending = state.stack.at(-1);
+  if (!pending || pending.kind !== "protect" || pending.protectorId !== protectorId) return undefined;
+  const protector = getPlayer(state.players, protectorId);
+  const lord = getPlayer(state.players, pending.targetId);
+  const card = sortForDiscard(protector.hand)[0];
+  if (!card) return undefined;
+  if (lord.hp <= pending.damage) return card.id;
+  if (difficulty === "relaxed") return undefined;
+  if (difficulty === "standard") {
+    return lord.hp <= 2 || protector.hand.length >= 4 ? card.id : undefined;
+  }
+  return card.id;
+}
+
+export function chooseAiProbeGuess(
+  state: DingState,
+  actorId: PlayerId,
+): IdentityId | undefined {
+  const pending = state.stack.at(-1);
+  if (!pending || pending.kind !== "probe" || pending.actorId !== actorId) return undefined;
+  const target = getPlayer(state.players, pending.targetId);
+  if (target.revealed) return target.identity;
+  const belief = identityBelief(state, actorId, target.id);
+  const candidates: IdentityId[] = ["loyalist", "rebel", "renegade"];
+  return candidates
+    .sort((left, right) => belief[right] - belief[left] || left.localeCompare(right))[0];
+}
+
 /** 选择主动技消耗与目标。当前所有主动技只使用公开信息与自身阵营判断。 */
 export function chooseAiSkillDecision(
   state: DingState,
@@ -380,21 +480,26 @@ export function chooseAiSkillDecision(
   }
 
   const costCard = chooseCost();
-  if (!costCard) return undefined;
+  if (skill.cost.kind === "discard" && !costCard) return undefined;
   const targetIds = [...pending.targetIds];
   const self = targetIds.find((id) => id === owner.id);
-  if (self) return { cardUid: costCard.id, targetId: self };
+  if (self) return { cardUid: costCard?.id, targetId: self };
+
+  if (skill.target === "other") {
+    const targetId = chooseAiSkillTarget(state, owner.id, targetIds, skill.effect.kind);
+    return targetId ? { cardUid: costCard?.id, targetId } : undefined;
+  }
 
   const lord = state.players.find((player) => player.identity === "lord");
   if ((owner.identity === "lord" || owner.identity === "loyalist")
     && lord && targetIds.includes(lord.id)) {
-    return { cardUid: costCard.id, targetId: lord.id };
+    return { cardUid: costCard?.id, targetId: lord.id };
   }
 
   const target = targetIds
     .map((id) => getPlayer(state.players, id))
     .sort((left, right) => left.hp - right.hp || left.hand.length - right.hand.length || left.seat - right.seat)[0];
-  return target ? { cardUid: costCard.id, targetId: target.id } : undefined;
+  return target ? { cardUid: costCard?.id, targetId: target.id } : undefined;
 }
 
 /**
