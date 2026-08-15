@@ -13,11 +13,23 @@ import {
   getTargetOptions,
   playCard,
   requiredDiscards,
+  respondToDuel,
   respondToDying,
+  respondToHorde,
   respondToStrike,
   respondToTrick,
+  respondToVolley,
 } from "./domain/engine";
-import { chooseAiDiscards, chooseAiDyingResponse, chooseAiMove, chooseAiNullifyResponse, chooseAiStrikeResponse } from "./domain/ai";
+import {
+  chooseAiDiscards,
+  chooseAiDuelResponse,
+  chooseAiDyingResponse,
+  chooseAiHordeResponse,
+  chooseAiMove,
+  chooseAiNullifyResponse,
+  chooseAiStrikeResponse,
+  chooseAiVolleyResponse,
+} from "./domain/ai";
 import { IDENTITY_NAMES, WINNER_COPY } from "./domain/data";
 import { DING_SAVE_SCHEMA_VERSION, restoreDingState, serializeDingState } from "./domain/persistence";
 import type { DingCard, DingPlayer, DingState, PlayerId } from "./domain/types";
@@ -117,15 +129,29 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
   const pendingStrike = stackTop?.kind === "strike" ? stackTop : undefined;
   const pendingDying = stackTop?.kind === "dying" ? stackTop : undefined;
   const pendingTrick = stackTop?.kind === "trick" ? stackTop : undefined;
+  const pendingDuel = stackTop?.kind === "duel" ? stackTop : undefined;
+  const pendingHorde = stackTop?.kind === "horde" ? stackTop : undefined;
+  const pendingVolley = stackTop?.kind === "volley" ? stackTop : undefined;
   const dyingResponder = pendingDying ? pendingDying.responders[pendingDying.cursor] : undefined;
   const trickResponder = pendingTrick?.awaitingResponse ? pendingTrick.responders[pendingTrick.cursor] : undefined;
+  const duelResponder = pendingDuel?.turnId;
+  const hordeResponder = pendingHorde ? pendingHorde.responders[pendingHorde.cursor] : undefined;
+  const volleyResponder = pendingVolley ? pendingVolley.responders[pendingVolley.cursor] : undefined;
   const humanCanPlay = playableCards.length > 0 && state.phase === "play" && active.id === human.id && state.stack.length === 0;
   const humanDiscarding = state.phase === "discard" && active.id === human.id && requiredDiscards(state, human.id) > 0 && state.stack.length === 0;
   const humanRespondingStrike = pendingStrike?.targetId === human.id;
   const humanRespondingDying = dyingResponder === human.id;
   const humanRespondingTrick = trickResponder === human.id;
+  const humanRespondingDuel = duelResponder === human.id;
+  const humanRespondingHorde = hordeResponder === human.id;
+  const humanRespondingVolley = volleyResponder === human.id;
   const overlayOpen = showRules || showLog || state.status === "finished";
-  const pendingHumanResponse = humanRespondingStrike || humanRespondingDying || humanRespondingTrick;
+  const pendingHumanResponse = humanRespondingStrike
+    || humanRespondingDying
+    || humanRespondingTrick
+    || humanRespondingDuel
+    || humanRespondingHorde
+    || humanRespondingVolley;
 
   const shouldAutomate = state.status === "playing"
     && !overlayOpen
@@ -182,6 +208,47 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
       return () => window.clearTimeout(timer);
     }
 
+    if (pendingDuel && duelResponder) {
+      const strikeUid = chooseAiDuelResponse(state, duelResponder);
+      const timer = window.setTimeout(() => {
+        playSound(strikeUid ? "card" : "hit");
+        setState((current) => {
+          const pending = current.stack.at(-1);
+          if (current.revision !== expectedRevision || pending?.kind !== "duel") return current;
+          return respondToDuel(current, pending.turnId, strikeUid);
+        });
+      }, playbackDelay(560, playbackSpeed));
+      return () => window.clearTimeout(timer);
+    }
+
+    if (pendingHorde && hordeResponder) {
+      const strikeUid = chooseAiHordeResponse(state, hordeResponder);
+      const timer = window.setTimeout(() => {
+        playSound(strikeUid ? "card" : "hit");
+        setState((current) => {
+          const pending = current.stack.at(-1);
+          if (current.revision !== expectedRevision || pending?.kind !== "horde") return current;
+          const responder = pending.responders[pending.cursor];
+          return respondToHorde(current, responder, strikeUid);
+        });
+      }, playbackDelay(560, playbackSpeed));
+      return () => window.clearTimeout(timer);
+    }
+
+    if (pendingVolley && volleyResponder) {
+      const evadeUid = chooseAiVolleyResponse(state, volleyResponder);
+      const timer = window.setTimeout(() => {
+        playSound(evadeUid ? "card" : "hit");
+        setState((current) => {
+          const pending = current.stack.at(-1);
+          if (current.revision !== expectedRevision || pending?.kind !== "volley") return current;
+          const responder = pending.responders[pending.cursor];
+          return respondToVolley(current, responder, evadeUid);
+        });
+      }, playbackDelay(560, playbackSpeed));
+      return () => window.clearTimeout(timer);
+    }
+
     const timer = window.setTimeout(() => {
       setState((current) => {
         if (current.revision !== expectedRevision || current.status !== "playing") return current;
@@ -203,7 +270,7 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
       });
     }, playbackDelay(420, playbackSpeed));
     return () => window.clearTimeout(timer);
-  }, [dyingResponder, pendingDying, pendingStrike, pendingTrick, playSound, playbackSpeed, shouldAutomate, state, trickResponder]);
+  }, [duelResponder, dyingResponder, hordeResponder, pendingDuel, pendingDying, pendingHorde, pendingStrike, pendingTrick, pendingVolley, playSound, playbackSpeed, shouldAutomate, state, trickResponder, volleyResponder]);
 
   useEffect(() => {
     if (!persistence || saveBlocked || (state.revision === 0 && !persistence.restored)) return;
@@ -300,7 +367,13 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
         ? pendingTrick.cardType === "nullify"
           ? `${state.players.find((player) => player.id === pendingTrick.actorId)?.displayName}的「无懈可击」等待反制响应。`
           : `${state.players.find((player) => player.id === pendingTrick.actorId)?.displayName}的「${state.discard.find((card) => card.id === pendingTrick.cardUid)?.name ?? "锦囊"}」等待无懈可击响应。`
-        : state.lastAction?.text ?? "等待行动。";
+        : pendingDuel
+          ? `${state.players.find((player) => player.id === pendingDuel.turnId)?.displayName}需要打出「刺击」应对约斗。`
+          : pendingHorde
+            ? `${state.players.find((player) => player.id === pendingHorde.responders[pendingHorde.cursor])?.displayName}需要打出「刺击」抵御合围。`
+            : pendingVolley
+              ? `${state.players.find((player) => player.id === pendingVolley.responders[pendingVolley.cursor])?.displayName}需要打出「闪避」躲避齐射。`
+              : state.lastAction?.text ?? "等待行动。";
   const required = humanDiscarding ? requiredDiscards(state, human.id) : 0;
   const discardReady = humanDiscarding && discardSelection.length === required;
 
@@ -423,6 +496,69 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
               </div>
             </>
           ) : null}
+          {humanRespondingDuel && pendingDuel ? (
+            <>
+              <div>
+                <small>约斗响应</small>
+                <strong>约斗轮到你出「刺击」</strong>
+                <p>双方轮流打出「刺击」，先打不出的一方受到对方造成的 1 点伤害。</p>
+              </div>
+              <div className="ding-response__actions">
+                {human.hand.filter((card) => card.type === "strike").map((card) => (
+                  <button key={card.id} type="button" onClick={() => {
+                    setState((current) => respondToDuel(current, human.id, card.id));
+                    playSound("card");
+                  }}>刺击</button>
+                ))}
+                <button type="button" onClick={() => {
+                  setState((current) => respondToDuel(current, human.id));
+                  playSound("hit");
+                }}>打不出</button>
+              </div>
+            </>
+          ) : null}
+          {humanRespondingHorde && pendingHorde ? (
+            <>
+              <div>
+                <small>合围响应</small>
+                <strong>合围压境</strong>
+                <p>打出「刺击」抵御，否则受到 {state.players.find((player) => player.id === pendingHorde.actorId)?.displayName} 造成的 1 点伤害。</p>
+              </div>
+              <div className="ding-response__actions">
+                {human.hand.filter((card) => card.type === "strike").map((card) => (
+                  <button key={card.id} type="button" onClick={() => {
+                    setState((current) => respondToHorde(current, human.id, card.id));
+                    playSound("card");
+                  }}>刺击</button>
+                ))}
+                <button type="button" onClick={() => {
+                  setState((current) => respondToHorde(current, human.id));
+                  playSound("hit");
+                }}>不打出</button>
+              </div>
+            </>
+          ) : null}
+          {humanRespondingVolley && pendingVolley ? (
+            <>
+              <div>
+                <small>齐射响应</small>
+                <strong>齐射袭来</strong>
+                <p>打出「闪避」躲避，否则受到 {state.players.find((player) => player.id === pendingVolley.actorId)?.displayName} 造成的 1 点伤害。</p>
+              </div>
+              <div className="ding-response__actions">
+                {human.hand.filter((card) => card.type === "evade").map((card) => (
+                  <button key={card.id} type="button" onClick={() => {
+                    setState((current) => respondToVolley(current, human.id, card.id));
+                    playSound("card");
+                  }}>闪避</button>
+                ))}
+                <button type="button" onClick={() => {
+                  setState((current) => respondToVolley(current, human.id));
+                  playSound("hit");
+                }}>不打出</button>
+              </div>
+            </>
+          ) : null}
         </section>
       ) : (
         <section className="ding-hand-dock" aria-label="你的手牌">
@@ -493,20 +629,22 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
           <article className="ding-rules">
             <button type="button" className="ding-rules__close" onClick={() => setShowRules(false)} aria-label="关闭规则">×</button>
             <span className="ding-rules__ribbon">身份局</span>
-            <small>TABLE 004 · M1 结算栈</small>
+            <small>TABLE 004 · M1.5 扩展牌池</small>
             <h2 id="ding-rules-title">四席暗局，<br />先明主君，再定鼎。</h2>
             <p>主君身份公开并多 1 点体力；其余三人身份隐藏。主君与辅臣要清剿叛锋与流谋；叛锋要在主君倒下时达阵；流谋必须成为主君倒下时唯一的其他存活者。</p>
             <div className="ding-rules__grid">
               <span><b>回合</b>准备 → 摸 2 张 → 出牌 → 弃牌到手牌上限（等于当前体力）</span>
               <span><b>刺击</b>攻击范围内每回合一次；目标可出「闪避」</span>
               <span><b>疗元</b>受伤时自疗，或在任何人濒死时救援</span>
-              <span><b>锦囊</b>聚势/拆解/牵袭进入结算栈，按座位顺序询问「无懈可击」</span>
+              <span><b>锦囊</b>聚势/拆解/牵袭/约斗/合围/齐射/同袍先询问「无懈可击」，再进结算栈</span>
               <span><b>无懈</b>抵消一张锦囊；无懈本身可被另一张无懈反制，层层嵌套后自栈顶结算</span>
+              <span><b>约斗</b>目标先出「刺击」，双方轮流；先打不出的一方受对方 1 点伤害</span>
+              <span><b>合围/齐射</b>其他角色依次需出「刺击」/「闪避」，否则受 1 点伤害</span>
               <span><b>距离</b>相邻座位为 1；赤影 -1、磐影 +1、长锋射程 2</span>
               <span><b>胜负</b>主君死时若只剩流谋则流谋胜，否则叛锋胜；叛锋与流谋全灭则主君方胜</span>
               <span><b>奖惩</b>击退叛锋摸 3 张；主君误杀辅臣弃光手牌</span>
             </div>
-            <p className="ding-rules__scope">M1 已支持无懈可击响应链与结算栈；武将技能、决斗、群体锦囊与延时锦囊仍留待后续里程碑。</p>
+            <p className="ding-rules__scope">M1.5 已支持无懈链、约斗与群体锦囊；武将技能与延时锦囊仍留待后续里程碑。</p>
             <button type="button" className="ding-rules__enter" onClick={() => { setShowRules(false); playSound("card"); }}>入席开局 <span>→</span></button>
           </article>
         </div>

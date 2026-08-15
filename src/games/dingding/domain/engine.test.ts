@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   chooseAiDiscards,
+  chooseAiDuelResponse,
   chooseAiDyingResponse,
+  chooseAiHordeResponse,
   chooseAiMove,
   chooseAiNullifyResponse,
   chooseAiStrikeResponse,
+  chooseAiVolleyResponse,
 } from "./ai";
 import { buildDeck } from "./data";
 import {
@@ -16,9 +19,12 @@ import {
   getPlayableCards,
   getTargetOptions,
   playCard,
+  respondToDuel,
   respondToDying,
+  respondToHorde,
   respondToStrike,
   respondToTrick,
+  respondToVolley,
 } from "./engine";
 import type { DingCard, DingPlayer, DingState, PlayerId } from "./types";
 
@@ -32,6 +38,10 @@ const CARD_DEFINITIONS: Record<string, Omit<DingCard, "id">> = {
   dismantle: { name: "拆解", kind: "trick", type: "dismantle", symbol: "⌁", tone: "#000", description: "test" },
   snatch: { name: "牵袭", kind: "trick", type: "snatch", symbol: "↯", tone: "#000", description: "test" },
   nullify: { name: "无懈可击", kind: "trick", type: "nullify", symbol: "⊕", tone: "#000", description: "test" },
+  duel: { name: "约斗", kind: "trick", type: "duel", symbol: "斗", tone: "#000", description: "test" },
+  horde: { name: "合围", kind: "trick", type: "horde", symbol: "围", tone: "#000", description: "test" },
+  volley: { name: "齐射", kind: "trick", type: "volley", symbol: "矢", tone: "#000", description: "test" },
+  grove: { name: "同袍", kind: "trick", type: "grove", symbol: "和", tone: "#000", description: "test" },
   longblade: { name: "长锋", kind: "equipment", type: "weapon", symbol: "⾧", tone: "#000", description: "test", range: 2 },
   repeater: { name: "连机弩", kind: "equipment", type: "weapon", symbol: "串", tone: "#000", description: "test", range: 1, unlimitedStrikes: true },
   swift: { name: "赤影", kind: "equipment", type: "minus-horse", symbol: "驰", tone: "#000", description: "test" },
@@ -346,6 +356,156 @@ describe("Ding Ding engine", () => {
     expect(respondToTrick(played, "north")).toBe(played); // 还没轮到北座
   });
 
+  it("resolves a duel with alternating strikes until someone cannot play", () => {
+    const game = state({}, [
+      player("south", { hand: [card("duel", "duel-0"), card("strike", "strike-s")] }),
+      player("east", { hand: [card("strike", "strike-e")] }),
+      player("north"),
+      player("west"),
+    ]);
+    let next = passAllTrickResponses(playCard(game, "south", "duel-0", "east"));
+    expect(next.stack.at(-1)).toMatchObject({ kind: "duel", turnId: "east" });
+
+    next = respondToDuel(next, "east", "strike-e");
+    expect(next.stack.at(-1)).toMatchObject({ kind: "duel", turnId: "south" });
+    next = respondToDuel(next, "south", "strike-s");
+    expect(next.stack.at(-1)).toMatchObject({ kind: "duel", turnId: "east" });
+    next = respondToDuel(next, "east");
+
+    expect(next.stack).toHaveLength(0);
+    expect(next.players[1].hp).toBe(3);
+    expect(next.discard.map((entry) => entry.id)).toEqual(expect.arrayContaining(["duel-0", "strike-e", "strike-s"]));
+  });
+
+  it("lets nullify stop a duel before it starts", () => {
+    const game = state({}, [
+      player("south", { hand: [card("duel", "duel-0")] }),
+      player("east", { hand: [card("nullify", "nullify-0")] }),
+      player("north"),
+      player("west"),
+    ]);
+    let next = playCard(game, "south", "duel-0", "east");
+    next = respondToTrick(next, "south");
+    next = respondToTrick(next, "east", "nullify-0");
+    next = passAllTrickResponses(next);
+
+    expect(next.stack).toHaveLength(0);
+    expect(next.players[1].hp).toBe(4);
+    expect(next.log.some((entry) => entry.text.includes("约斗") && entry.text.includes("抵消"))).toBe(true);
+  });
+
+  it("cycles horde responses and damages players who do not strike", () => {
+    const game = state({}, [
+      player("south", { hand: [card("horde", "horde-0")] }),
+      player("east", { hand: [card("strike", "strike-e")] }),
+      player("north"),
+      player("west", { hand: [card("strike", "strike-w")] }),
+    ]);
+    let next = passAllTrickResponses(playCard(game, "south", "horde-0", "south"));
+    expect(next.stack.at(-1)).toMatchObject({ kind: "horde", cursor: 0 });
+
+    next = respondToHorde(next, "east", "strike-e");
+    expect(next.stack.at(-1)).toMatchObject({ kind: "horde", cursor: 1 });
+    next = respondToHorde(next, "north");
+    expect(next.players[2].hp).toBe(3);
+    expect(next.stack.at(-1)).toMatchObject({ kind: "horde", cursor: 2 });
+    next = respondToHorde(next, "west", "strike-w");
+
+    expect(next.stack).toHaveLength(0);
+    expect(next.players[1].hp).toBe(4);
+    expect(next.players[3].hp).toBe(4);
+    expect(next.discard.map((entry) => entry.id)).toEqual(expect.arrayContaining(["horde-0", "strike-e", "strike-w"]));
+  });
+
+  it("cycles volley responses and damages players who do not evade", () => {
+    const game = state({}, [
+      player("south", { hand: [card("volley", "volley-0")] }),
+      player("east", { hand: [card("evade", "evade-e")] }),
+      player("north"),
+      player("west", { hand: [card("evade", "evade-w")] }),
+    ]);
+    let next = passAllTrickResponses(playCard(game, "south", "volley-0", "south"));
+    next = respondToVolley(next, "east", "evade-e");
+    next = respondToVolley(next, "north");
+    expect(next.players[2].hp).toBe(3);
+    next = respondToVolley(next, "west", "evade-w");
+
+    expect(next.stack).toHaveLength(0);
+    expect(next.players[1].hp).toBe(4);
+    expect(next.players[3].hp).toBe(4);
+  });
+
+  it("suspends a horde while a defender is dying and resumes afterwards", () => {
+    const game = state({}, [
+      player("south", { hand: [card("horde", "horde-0")] }),
+      player("east", { hp: 1 }),
+      player("north", { hand: [card("strike", "strike-n"), card("salve", "salve-n")] }),
+      player("west"),
+    ]);
+    let next = passAllTrickResponses(playCard(game, "south", "horde-0", "south"));
+    next = respondToHorde(next, "east");
+    // 东座倒下：濒死帧压在合围帧之上，合围的游标已经前进到北座。
+    expect(next.stack.at(-1)).toMatchObject({ kind: "dying", targetId: "east" });
+    expect(next.stack.at(-2)).toMatchObject({ kind: "horde", cursor: 1 });
+
+    next = respondToDying(next, "east");
+    next = respondToDying(next, "north", "salve-n");
+    expect(next.players[1].hp).toBe(1);
+    expect(next.stack.at(-1)).toMatchObject({ kind: "horde", cursor: 1 });
+
+    next = respondToHorde(next, "north", "strike-n");
+    expect(next.stack.at(-1)).toMatchObject({ kind: "horde", cursor: 2 });
+    next = respondToHorde(next, "west");
+    expect(next.stack).toHaveLength(0);
+    expect(next.players[3].hp).toBe(3);
+  });
+
+  it("heals every wounded player with grove", () => {
+    const game = state({}, [
+      player("south", { hp: 2, hand: [card("grove", "grove-0")] }),
+      player("east", { hp: 3 }),
+      player("north", { hp: 4 }),
+      player("west", { hp: 1 }),
+    ]);
+    const next = passAllTrickResponses(playCard(game, "south", "grove-0", "south"));
+    expect(next.stack).toHaveLength(0);
+    expect(next.players.map((entry) => entry.hp)).toEqual([3, 4, 4, 2]);
+  });
+
+  it("AI plays and responds to the expanded trick pool", () => {
+    expect(chooseAiDuelResponse(state({}), "east")).toBeUndefined();
+    const duelGame = state({}, [
+      player("south"),
+      player("east", { hand: [card("strike", "strike-e")] }),
+      player("north"),
+      player("west"),
+    ]);
+    expect(chooseAiDuelResponse(duelGame, "east")).toBe("strike-e");
+
+    const hordeGame = state({ revision: 0 }, [
+      player("south"),
+      player("east", { hp: 1, hand: [card("strike", "strike-e")] }),
+      player("north"),
+      player("west"),
+    ]);
+    expect(chooseAiHordeResponse(hordeGame, "east")).toBe("strike-e");
+    const volleyGame = state({ revision: 0 }, [
+      player("south"),
+      player("east", { hp: 1, hand: [card("evade", "evade-e")] }),
+      player("north"),
+      player("west"),
+    ]);
+    expect(chooseAiVolleyResponse(volleyGame, "east")).toBe("evade-e");
+
+    const moveGame = state({ activePlayerId: "east" }, [
+      player("south"),
+      player("east", { hand: [card("horde", "horde-e")] }),
+      player("north"),
+      player("west"),
+    ]);
+    expect(chooseAiMove(moveGame, "east")).toMatchObject({ kind: "play", cardUid: "horde-e" });
+  });
+
   it("AI protects its own tricks and nullifies tricks aimed at itself", () => {
     const dismantleGame = state({}, [
       player("south", { hand: [card("dismantle", "dismantle-0")] }),
@@ -424,6 +584,17 @@ describe("Ding Ding engine", () => {
           const responder = top.responders[top.cursor];
           const nullifyUid = chooseAiNullifyResponse(game, responder);
           game = respondToTrick(game, responder, nullifyUid);
+        } else if (top?.kind === "duel") {
+          const strikeUid = chooseAiDuelResponse(game, top.turnId);
+          game = respondToDuel(game, top.turnId, strikeUid);
+        } else if (top?.kind === "horde") {
+          const responder = top.responders[top.cursor];
+          const strikeUid = chooseAiHordeResponse(game, responder);
+          game = respondToHorde(game, responder, strikeUid);
+        } else if (top?.kind === "volley") {
+          const responder = top.responders[top.cursor];
+          const evadeUid = chooseAiVolleyResponse(game, responder);
+          game = respondToVolley(game, responder, evadeUid);
         } else if (game.phase === "discard") {
           const toDiscard = chooseAiDiscards(game, game.activePlayerId);
           game = toDiscard.length > 0 ? discardCards(game, game.activePlayerId, toDiscard) : advancePhase(game);

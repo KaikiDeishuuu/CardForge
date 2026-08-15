@@ -79,6 +79,42 @@ export const CARD_CATALOG: Readonly<Record<string, DingCard>> = {
     tone: "#6b5b8e",
     description: "响应一张锦囊牌时使用，抵消其效果；「无懈可击」本身也可以被另一张「无懈可击」反制。",
   },
+  duel: {
+    id: "duel",
+    name: "约斗",
+    kind: "trick",
+    type: "duel",
+    symbol: "斗",
+    tone: "#7a5c8e",
+    description: "出牌阶段对一名其他角色使用。目标先打出「刺击」，随后双方轮流打出「刺击」；先打不出的一方受到对方造成的 1 点伤害。",
+  },
+  horde: {
+    id: "horde",
+    name: "合围",
+    kind: "trick",
+    type: "horde",
+    symbol: "围",
+    tone: "#8e5c4a",
+    description: "出牌阶段使用。其他角色依次需打出一张「刺击」，否则受到你造成的 1 点伤害。",
+  },
+  volley: {
+    id: "volley",
+    name: "齐射",
+    kind: "trick",
+    type: "volley",
+    symbol: "矢",
+    tone: "#5c7a8e",
+    description: "出牌阶段使用。其他角色依次需打出一张「闪避」，否则受到你造成的 1 点伤害。",
+  },
+  grove: {
+    id: "grove",
+    name: "同袍",
+    kind: "trick",
+    type: "grove",
+    symbol: "和",
+    tone: "#4f8a6d",
+    description: "出牌阶段使用。所有已受伤的角色回复 1 点体力。",
+  },
   longblade: {
     id: "longblade",
     name: "长锋",
@@ -121,8 +157,8 @@ export const CARD_CATALOG: Readonly<Record<string, DingCard>> = {
 };
 
 /**
- * M1 牌堆：基础牌之外加入即时锦囊与三张「无懈可击」。
- * 后续里程碑再加入决斗、群体锦囊与延时锦囊。
+ * M1.5 牌堆：即时锦囊加入约斗、合围、齐射与同袍，
+ * 群体牌全部复用结算栈；后续里程碑再加入延时锦囊与武将技能。
  */
 const DECK_RECIPE: readonly (keyof typeof CARD_CATALOG)[] = [
   "strike", "strike", "strike", "strike", "strike",
@@ -137,6 +173,10 @@ const DECK_RECIPE: readonly (keyof typeof CARD_CATALOG)[] = [
   "dismantle", "dismantle", "dismantle", "dismantle",
   "snatch", "snatch", "snatch", "snatch",
   "nullify", "nullify", "nullify",
+  "duel", "duel",
+  "horde", "horde",
+  "volley", "volley",
+  "grove",
   "longblade", "longblade",
   "repeater", "repeater",
   "swift", "swift",

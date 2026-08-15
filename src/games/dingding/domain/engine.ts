@@ -268,6 +268,14 @@ export function getTargetOptions(state: DingState, actorId: PlayerId, card: Ding
       return state.players
         .filter((candidate) => candidate.id !== actor.id && candidate.alive && candidate.hand.length > 0 && distanceBetween(state.players, actor.id, candidate.id) === 1)
         .map((candidate) => candidate.id);
+    case "duel":
+      return state.players
+        .filter((candidate) => candidate.id !== actor.id && candidate.alive)
+        .map((candidate) => candidate.id);
+    case "horde":
+    case "volley":
+    case "grove":
+      return [actor.id];
     case "weapon": {
       const current = actor.equipment.weapon;
       return !current || current.id !== card.id ? [actor.id] : [];
@@ -344,15 +352,20 @@ export function playCard(state: DingState, actorId: PlayerId, cardUid: string, t
     }
     case "focus":
     case "dismantle":
-    case "snatch": {
+    case "snatch":
+    case "duel":
+    case "horde":
+    case "volley":
+    case "grove": {
       discard = [...discard, card];
-      const effectTarget = card.type === "focus" ? undefined : targetId;
-      if (card.type !== "focus" && !effectTarget) return state;
+      const needsTarget = card.type === "dismantle" || card.type === "snatch" || card.type === "duel";
+      const effectTarget = needsTarget ? targetId : undefined;
+      if (needsTarget && !effectTarget) return state;
       stack = [createTrickFrame(state.revision + 1, actorId, cardUid, card.type, effectTarget, players)];
       texts.push(
-        card.type === "focus"
-          ? `${actor.displayName}使用「聚势」，等待无懈可击响应。`
-          : `${actor.displayName}对${getPlayer(players, effectTarget!).displayName}使用「${card.name}」，等待无懈可击响应。`,
+        needsTarget
+          ? `${actor.displayName}对${getPlayer(players, effectTarget!).displayName}使用「${card.name}」，等待无懈可击响应。`
+          : `${actor.displayName}使用「${card.name}」，等待无懈可击响应。`,
       );
       break;
     }
@@ -448,6 +461,48 @@ function applyTrickEffect(
     } else {
       draft.texts.push(`${actor.displayName}的「${cardName}」生效，但${target.displayName}没有手牌可取。`);
     }
+    return;
+  }
+
+  if (frame.cardType === "duel" && frame.targetId) {
+    const target = getPlayer(draft.players, frame.targetId);
+    if (target.alive && target.id !== actor.id) {
+      draft.stack = [...draft.stack, {
+        kind: "duel",
+        actorId: actor.id,
+        targetId: target.id,
+        turnId: target.id,
+        cardUid: frame.cardUid,
+      }];
+      draft.texts.push(`${actor.displayName}的「约斗」生效，${target.displayName}先出「刺击」。`);
+    } else {
+      draft.texts.push(`${actor.displayName}的「约斗」生效，但目标已不在场。`);
+    }
+    return;
+  }
+
+  if (frame.cardType === "horde" || frame.cardType === "volley") {
+    const responders = aliveOrderFrom(draft.players, actor.id).filter((id) => id !== actor.id);
+    if (responders.length === 0) {
+      draft.texts.push(`${actor.displayName}的「${cardName}」生效，但没有其他角色需要响应。`);
+      return;
+    }
+    draft.stack = [...draft.stack, frame.cardType === "horde"
+      ? { kind: "horde", actorId: actor.id, cardUid: frame.cardUid, responders, cursor: 0 }
+      : { kind: "volley", actorId: actor.id, cardUid: frame.cardUid, responders, cursor: 0 }];
+    draft.texts.push(`${actor.displayName}的「${cardName}」生效，按座位顺序逐席响应。`);
+    return;
+  }
+
+  if (frame.cardType === "grove") {
+    let healed = 0;
+    for (const player of draft.players.filter((entry) => entry.alive && entry.hp < entry.maxHp)) {
+      draft.players = replacePlayer(draft.players, player.id, (entry) => ({ ...entry, hp: entry.hp + 1 }));
+      healed += 1;
+    }
+    draft.texts.push(healed > 0
+      ? `${actor.displayName}的「同袍」生效，${healed} 名角色回复 1 点体力。`
+      : `${actor.displayName}的「同袍」生效，但没有角色受伤。`);
   }
 }
 
@@ -540,6 +595,101 @@ export function respondToTrick(state: DingState, responderId: PlayerId, cardUid?
     entry.kind === "trick" && entry.frameId === top.frameId ? { ...entry, awaitingResponse: false } : entry,
   );
   return settleTrickFrames(state, stack, [`${responder.displayName}不响应，开始结算「${cardNameInPile(state.discard, top.cardUid)}」。`]);
+}
+
+/** 群体锦囊当前响应者之后的下一名存活响应者；没有则返回 undefined。 */
+function nextGroupCursor(
+  players: readonly DingPlayer[],
+  responders: readonly PlayerId[],
+  cursor: number,
+): number | undefined {
+  for (let index = cursor + 1; index < responders.length; index += 1) {
+    if (players.find((player) => player.id === responders[index])?.alive) return index;
+  }
+  return undefined;
+}
+
+export function respondToDuel(state: DingState, responderId: PlayerId, cardUid?: string): DingState {
+  const top = topFrame(state.stack);
+  if (state.status !== "playing" || !top || top.kind !== "duel" || top.turnId !== responderId) return state;
+  const responder = getPlayer(state.players, responderId);
+  const card = cardUid ? responder.hand.find((entry) => entry.id === cardUid) : undefined;
+  if (cardUid && card?.type !== "strike") return state;
+
+  const remaining = state.stack.slice(0, -1);
+  if (card) {
+    const players = replacePlayer(state.players, responderId, (player) => ({
+      ...player,
+      hand: player.hand.filter((entry) => entry.id !== cardUid),
+    }));
+    const nextTurnId = responderId === top.targetId ? top.actorId : top.targetId;
+    const texts = [`${responder.displayName}打出「刺击」，轮到${getPlayer(players, nextTurnId).displayName}。`];
+    return withAction(state, responderId, texts, {
+      players,
+      discard: [...state.discard, card],
+      stack: [...remaining, { ...top, turnId: nextTurnId }],
+    });
+  }
+
+  const winnerId = responderId === top.targetId ? top.actorId : top.targetId;
+  const opened = withAction(state, responderId, [`${responder.displayName}打不出「刺击」。`], {});
+  return damagePlayer({ ...opened, stack: remaining }, responderId, 1, winnerId);
+}
+
+export function respondToHorde(state: DingState, responderId: PlayerId, cardUid?: string): DingState {
+  const top = topFrame(state.stack);
+  if (state.status !== "playing" || !top || top.kind !== "horde") return state;
+  if (top.responders[top.cursor] !== responderId) return state;
+  const responder = getPlayer(state.players, responderId);
+  const card = cardUid ? responder.hand.find((entry) => entry.id === cardUid) : undefined;
+  if (cardUid && card?.type !== "strike") return state;
+
+  const remaining = state.stack.slice(0, -1);
+  if (card) {
+    const players = replacePlayer(state.players, responderId, (player) => ({
+      ...player,
+      hand: player.hand.filter((entry) => entry.id !== cardUid),
+    }));
+    const cursor = nextGroupCursor(players, top.responders, top.cursor);
+    return withAction(state, responderId, [`${responder.displayName}打出「刺击」抵御合围。`], {
+      players,
+      discard: [...state.discard, card],
+      stack: cursor === undefined ? remaining : [...remaining, { ...top, cursor }],
+    });
+  }
+
+  const cursor = nextGroupCursor(state.players, top.responders, top.cursor);
+  const baseStack = cursor === undefined ? remaining : [...remaining, { ...top, cursor }];
+  const opened = withAction(state, responderId, [`${responder.displayName}未打出「刺击」，受到合围伤害。`], {});
+  return damagePlayer({ ...opened, stack: baseStack }, responderId, 1, top.actorId);
+}
+
+export function respondToVolley(state: DingState, responderId: PlayerId, cardUid?: string): DingState {
+  const top = topFrame(state.stack);
+  if (state.status !== "playing" || !top || top.kind !== "volley") return state;
+  if (top.responders[top.cursor] !== responderId) return state;
+  const responder = getPlayer(state.players, responderId);
+  const card = cardUid ? responder.hand.find((entry) => entry.id === cardUid) : undefined;
+  if (cardUid && card?.type !== "evade") return state;
+
+  const remaining = state.stack.slice(0, -1);
+  if (card) {
+    const players = replacePlayer(state.players, responderId, (player) => ({
+      ...player,
+      hand: player.hand.filter((entry) => entry.id !== cardUid),
+    }));
+    const cursor = nextGroupCursor(players, top.responders, top.cursor);
+    return withAction(state, responderId, [`${responder.displayName}打出「闪避」躲开齐射。`], {
+      players,
+      discard: [...state.discard, card],
+      stack: cursor === undefined ? remaining : [...remaining, { ...top, cursor }],
+    });
+  }
+
+  const cursor = nextGroupCursor(state.players, top.responders, top.cursor);
+  const baseStack = cursor === undefined ? remaining : [...remaining, { ...top, cursor }];
+  const opened = withAction(state, responderId, [`${responder.displayName}未打出「闪避」，受到齐射伤害。`], {});
+  return damagePlayer({ ...opened, stack: baseStack }, responderId, 1, top.actorId);
 }
 
 function damagePlayer(

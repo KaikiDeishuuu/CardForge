@@ -12,11 +12,15 @@ export type DingCardType =
   | "dismantle"
   | "snatch"
   | "nullify"
+  | "duel"
+  | "horde"
+  | "volley"
+  | "grove"
   | "weapon"
   | "minus-horse"
   | "plus-horse";
 /** 会进入结算栈、可被「无懈可击」响应的锦囊类型。 */
-export type TrickCardType = "focus" | "dismantle" | "snatch" | "nullify";
+export type TrickCardType = "focus" | "dismantle" | "snatch" | "nullify" | "duel" | "horde" | "volley" | "grove";
 export type EquipmentSlot = "weapon" | "minusHorse" | "plusHorse";
 export type PlayerId = "south" | "east" | "north" | "west";
 
@@ -49,7 +53,9 @@ export interface DingPlayer extends ParticipantIdentity {
  * - `strike`：刺击等待目标响应闪避；
  * - `dying`：濒死角色按座位顺序求疗元；
  * - `trick`：锦囊等待无懈可击响应；`nullify` 帧代表一张「无懈可击」本身，
- *   它可以被另一张「无懈可击」反制，形成可插入的嵌套链。
+ *   它可以被另一张「无懈可击」反制，形成可插入的嵌套链；
+ * - `duel`：约斗双方轮流打刺击，先打不出的一方受到伤害；
+ * - `horde` / `volley`：群体锦囊逐个求刺击/闪避，期间触发的濒死帧压在其上，救回后继续。
  *
  * 栈顶（数组最后一项）是当前等待响应的结算；新帧只会压入栈顶，
  * 结算完成后从栈顶弹出，露出下一段待处理结算。
@@ -94,7 +100,37 @@ export interface PendingTrick {
   readonly negated?: boolean;
 }
 
-export type ResolutionFrame = PendingStrike | PendingDying | PendingTrick;
+export interface PendingDuel {
+  readonly kind: "duel";
+  /** 约斗发起者，也是无懈链结清后先出方以外的伤害判定方。 */
+  readonly actorId: PlayerId;
+  readonly targetId: PlayerId;
+  /** 当前应当打出「刺击」的一方。 */
+  readonly turnId: PlayerId;
+  readonly cardUid: string;
+}
+
+export interface PendingHorde {
+  readonly kind: "horde";
+  /** 群体锦囊的使用者，未响应者的伤害来源。 */
+  readonly actorId: PlayerId;
+  readonly cardUid: string;
+  /** 需要依次响应「刺击」的其他角色。 */
+  readonly responders: readonly PlayerId[];
+  readonly cursor: number;
+}
+
+export interface PendingVolley {
+  readonly kind: "volley";
+  /** 群体锦囊的使用者，未响应者的伤害来源。 */
+  readonly actorId: PlayerId;
+  readonly cardUid: string;
+  /** 需要依次响应「闪避」的其他角色。 */
+  readonly responders: readonly PlayerId[];
+  readonly cursor: number;
+}
+
+export type ResolutionFrame = PendingStrike | PendingDying | PendingTrick | PendingDuel | PendingHorde | PendingVolley;
 
 export interface DingLogEntry {
   readonly id: number;

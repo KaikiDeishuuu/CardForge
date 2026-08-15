@@ -11,10 +11,10 @@ import type {
 } from "./types";
 
 /**
- * v2：`pending` 单值升级为 `stack` 结算栈，并加入「无懈可击」。
- * v1 存档没有栈结构，不猜测迁移，按不可读处理（平台不会覆盖它）。
+ * v3：牌堆加入约斗/合围/齐射/同袍，结算栈新增 duel/horde/volley 帧。
+ * v2/v1 存档的牌堆与栈结构不一致，不猜测迁移，按不可读处理（平台不会覆盖它们）。
  */
-export const DING_SAVE_SCHEMA_VERSION = 2;
+export const DING_SAVE_SCHEMA_VERSION = 3;
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -25,9 +25,10 @@ const CARD_KINDS = new Set<string>(["basic", "trick", "equipment"]);
 const CARD_TYPES = new Set<string>([
   "strike", "evade", "salve",
   "focus", "dismantle", "snatch", "nullify",
+  "duel", "horde", "volley", "grove",
   "weapon", "minus-horse", "plus-horse",
 ]);
-const TRICK_TYPES = new Set<string>(["focus", "dismantle", "snatch", "nullify"]);
+const TRICK_TYPES = new Set<string>(["focus", "dismantle", "snatch", "nullify", "duel", "horde", "volley", "grove"]);
 const SLOTS: readonly EquipmentSlot[] = ["weapon", "minusHorse", "plusHorse"];
 
 function isRecord(value: unknown): value is UnknownRecord {
@@ -145,6 +146,19 @@ function isFrame(value: unknown): value is ResolutionFrame {
     if (value.negated === true && value.awaitingResponse === true) return false;
     return true;
   }
+  if (value.kind === "duel") {
+    return isPlayerId(value.actorId)
+      && isPlayerId(value.targetId)
+      && isPlayerId(value.turnId)
+      && (value.turnId === value.actorId || value.turnId === value.targetId)
+      && typeof value.cardUid === "string";
+  }
+  if (value.kind === "horde" || value.kind === "volley") {
+    return isPlayerId(value.actorId)
+      && typeof value.cardUid === "string"
+      && isIdList(value.responders)
+      && isNonNegativeInteger(value.cursor) && value.cursor < value.responders.length;
+  }
   return false;
 }
 
@@ -164,14 +178,20 @@ function validateStack(data: UnknownRecord, discard: readonly DingCard[]): boole
       if (frame.counterFrameId !== undefined && !frameIds.includes(frame.counterFrameId)) return false;
       if (frame.negated === true && frame.awaitingResponse === true) return false;
     }
-    if (frame.kind === "strike" || frame.kind === "trick") {
+    if (frame.kind === "strike" || frame.kind === "trick" || frame.kind === "duel" || frame.kind === "horde" || frame.kind === "volley") {
       const played = discard.find((card) => card.id === frame.cardUid);
       if (!played) return false;
-      if (frame.kind === "trick" && played.type !== frame.cardType) return false;
+      const expectedType = frame.kind === "trick" ? frame.cardType : frame.kind;
+      if (played.type !== expectedType) return false;
     }
+    const players = data.players as unknown as DingPlayer[];
     if (frame.kind === "strike" || frame.kind === "dying") {
-      if (!(data.players as unknown as DingPlayer[]).find((player) => player.id === frame.targetId)?.alive) return false;
-    } else if (!frame.responders.every((id) => (data.players as unknown as DingPlayer[]).find((player) => player.id === id)?.alive)) {
+      if (!players.find((player) => player.id === frame.targetId)?.alive) return false;
+    } else if (frame.kind === "duel") {
+      if (!players.find((player) => player.id === frame.actorId)?.alive) return false;
+      if (!players.find((player) => player.id === frame.targetId)?.alive) return false;
+      if (!players.find((player) => player.id === frame.turnId)?.alive) return false;
+    } else if (!frame.responders.every((id) => players.find((player) => player.id === id)?.alive)) {
       return false;
     }
   }
