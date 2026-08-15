@@ -74,6 +74,21 @@ export const gameRegistry = new GameRegistry().register({
     mark: "贯",
   },
   load: () => import("./guandan"),
+}).register({
+  manifest: {
+    id: "dingding",
+    name: "定鼎",
+    shortName: "定鼎",
+    description: "四席暗藏身份：主君、辅臣、叛锋与流谋围绕一张牌桌互相试探。",
+    genre: "身份阵营",
+    players: "1 人 + 3 AI",
+    sessionLength: "约 15–25 分钟",
+    availability: "playable",
+    accent: "#c8a15a",
+    mark: "鼎",
+    tagline: "四席暗局，先明主君，再定鼎",
+  },
+  load: () => import("./dingding"),
 });
 
 for (const game of plannedGames) gameRegistry.register(game);
