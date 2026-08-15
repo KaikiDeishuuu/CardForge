@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { GameRuntimeProps } from "../../core/games/types";
 import { useSound } from "../../shared/audio/SoundProvider";
+import { playbackDelay, usePlaybackSpeed } from "../../shared/settings/usePlaybackSpeed";
 import { PlayerHand } from "./components/PlayerHand";
 import { PlayerSeat } from "./components/PlayerSeat";
 import { CombatantSheet, TacticalBrief } from "./components/TacticalBrief";
@@ -9,9 +10,10 @@ import {
   ProfilePanel,
   ResponsePanel,
   ResultPanel,
+  EndTurnConfirm,
   type ProfileOverview,
 } from "./components/BattlePanels";
-import { chooseAiMove, chooseAiResponse } from "./domain/ai";
+import { chooseAiMove, chooseAiResponse, predictedIncomingDamage } from "./domain/ai";
 import { COMBATANT_SEEDS, PASSIVE_CATALOG, TEAM_NAMES } from "./domain/data";
 import {
   DEFAULT_HUMAN_ID,
@@ -33,6 +35,7 @@ import {
 import {
   createDefaultRootState,
   dismissFinishedMatch,
+  resetLifetimeProfile,
   startMatch,
   updateActiveMatch,
   updatePreferences,
@@ -69,11 +72,13 @@ export function EmberPactGame({ onExit, persistence }: GameRuntimeProps) {
   const [showBrief, setShowBrief] = useState(!restoredMatch);
   const [showProfile, setShowProfile] = useState(false);
   const [inspectedId, setInspectedId] = useState<string>();
+  const [endTurnConfirmOpen, setEndTurnConfirmOpen] = useState(false);
   const [notice, setNotice] = useState<string>();
   const [saveBlocked, setSaveBlocked] = useState(unreadableRestoredSave);
   const [saveUnavailable, setSaveUnavailable] = useState(false);
   const [restoredNotice, setRestoredNotice] = useState(Boolean(restoredMatch?.status === "playing"));
   const { enabled: soundEnabled, toggle: toggleSound, play: playSound } = useSound();
+  const { speed: playbackSpeed, cycle: cyclePlaybackSpeed } = usePlaybackSpeed();
 
   const state = root.activeMatch?.state ?? draft;
   const setupComplete = Boolean(root.activeMatch);
@@ -89,8 +94,8 @@ export function EmberPactGame({ onExit, persistence }: GameRuntimeProps) {
     && state.status === "playing"
     && state.phase === "response"
     && responder?.controller === "human";
-  const overlayOpen = showBrief || showLog || showProfile || Boolean(inspectedId);
-  const modalOpen = showBrief || showProfile || Boolean(inspectedId) || state.status === "finished";
+  const overlayOpen = showBrief || showLog || showProfile || Boolean(inspectedId) || endTurnConfirmOpen;
+  const modalOpen = showBrief || showProfile || Boolean(inspectedId) || endTurnConfirmOpen || state.status === "finished";
   const aiThinking = setupComplete
     && state.status === "playing"
     && !overlayOpen
@@ -125,7 +130,7 @@ export function EmberPactGame({ onExit, persistence }: GameRuntimeProps) {
             : declineResponse(match, responder.id);
           return updateActiveMatch(current, next);
         });
-      }, 620);
+      }, playbackDelay(620, playbackSpeed));
       return () => window.clearTimeout(timer);
     }
 
@@ -146,10 +151,10 @@ export function EmberPactGame({ onExit, persistence }: GameRuntimeProps) {
             : endTurn(match, active.id);
           return updateActiveMatch(current, next);
         });
-      }, 620);
+      }, playbackDelay(620, playbackSpeed));
       return () => window.clearTimeout(timer);
     }
-  }, [active, aiThinking, playSound, player.team, responder, state]);
+  }, [active, aiThinking, playSound, player.team, playbackSpeed, responder, state]);
 
   useEffect(() => {
     if (state.status !== "finished" || !state.winner) return;
@@ -209,11 +214,20 @@ export function EmberPactGame({ onExit, persistence }: GameRuntimeProps) {
     playSound("tap");
   }
 
-  function handleEndTurn() {
+  function commitEndTurn() {
     setSelectedUid(undefined);
     setNotice(undefined);
+    setEndTurnConfirmOpen(false);
     transitionMatch((current) => endTurn(current, player.id));
     playSound("tap");
+  }
+
+  function handleEndTurn() {
+    if (isHumanTurn && playableUids.length > 0) {
+      setEndTurnConfirmOpen(true);
+      return;
+    }
+    commitEndTurn();
   }
 
   function handleResponse(cardUid?: string) {
@@ -334,6 +348,7 @@ export function EmberPactGame({ onExit, persistence }: GameRuntimeProps) {
     wins: root.lifetimeProfile.wins,
     losses: root.lifetimeProfile.losses,
     draws: root.lifetimeProfile.draws,
+    abandons: root.lifetimeProfile.abandons,
     currentStreak: root.lifetimeProfile.currentWinStreak,
     bestStreak: root.lifetimeProfile.bestWinStreak,
     fastestWinRound: root.lifetimeProfile.fastestWinRounds,
@@ -357,6 +372,7 @@ export function EmberPactGame({ onExit, persistence }: GameRuntimeProps) {
           <button type="button" className="icon-button" onClick={() => setShowProfile(true)} aria-label="查看争焰记录"><span aria-hidden="true">◎</span></button>
           <button type="button" className="icon-button" onClick={() => setShowBrief(true)} aria-label="打开角色与规则"><span aria-hidden="true">?</span></button>
           <button type="button" className="icon-button" onClick={() => setShowLog((value) => !value)} aria-label="查看战报" aria-expanded={showLog} aria-controls="battle-log"><span aria-hidden="true">≡</span></button>
+          <button type="button" className="icon-button" onClick={cyclePlaybackSpeed} aria-label={`AI 速度 ${playbackSpeed}×`} title={`AI 速度 ${playbackSpeed}×`}><span className="speed-label" aria-hidden="true">{playbackSpeed}×</span></button>
           <button type="button" className="icon-button" onClick={toggleSound} aria-label={soundEnabled ? "关闭声音" : "开启声音"}><span aria-hidden="true">{soundEnabled ? "♪" : "×"}</span></button>
         </div>
       </header>
@@ -413,6 +429,7 @@ export function EmberPactGame({ onExit, persistence }: GameRuntimeProps) {
           attacker={attacker}
           responder={responder}
           attackName={pendingCard.name}
+          incomingDamage={predictedIncomingDamage(state)}
           cards={responseCards}
           onRespond={(cardUid) => handleResponse(cardUid)}
           onDecline={() => handleResponse()}
@@ -448,6 +465,15 @@ export function EmberPactGame({ onExit, persistence }: GameRuntimeProps) {
         </aside>
       )}
 
+      {endTurnConfirmOpen && (
+        <EndTurnConfirm
+          actionsRemaining={state.actionsRemaining}
+          playableCards={playableUids.length}
+          onConfirm={commitEndTurn}
+          onCancel={() => setEndTurnConfirmOpen(false)}
+        />
+      )}
+
       {showBrief && (
         <TacticalBrief
           combatants={state.combatants}
@@ -464,7 +490,14 @@ export function EmberPactGame({ onExit, persistence }: GameRuntimeProps) {
           onClose={dismissBrief}
         />
       )}
-      {showProfile && <ProfilePanel profile={profileOverview} onClose={() => setShowProfile(false)} />}
+      {showProfile && (
+        <ProfilePanel
+          profile={profileOverview}
+          canResetProfile={!root.activeMatch}
+          onResetProfile={() => setRoot((current) => resetLifetimeProfile(current))}
+          onClose={() => setShowProfile(false)}
+        />
+      )}
       {inspected && <CombatantSheet combatant={inspected} onClose={() => setInspectedId(undefined)} />}
 
       {state.status === "finished" && state.winner && (

@@ -18,7 +18,7 @@ function statusCount(combatants: readonly Combatant[], team: Combatant["team"], 
   ).length;
 }
 
-function predictedIncomingDamage(state: EmberPactState): number {
+export function predictedIncomingDamage(state: EmberPactState): number {
   const pending = state.pendingAttack;
   if (!pending) return 0;
   const actor = getCombatant(state, pending.actorId);

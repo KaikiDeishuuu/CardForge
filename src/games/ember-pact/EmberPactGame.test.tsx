@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GamePersistenceHandle } from "../../core/games/types";
 import { SoundProvider } from "../../shared/audio/SoundProvider";
 import { EmberPactGame } from "./EmberPactGame";
-import { ResponsePanel } from "./components/BattlePanels";
+import { EndTurnConfirm, ResponsePanel } from "./components/BattlePanels";
 import { TacticalBrief } from "./components/TacticalBrief";
 import { createInitialState } from "./domain/engine";
 import type { Difficulty } from "./domain/types";
@@ -29,6 +29,7 @@ describe("Ember Pact response accessibility", () => {
       attacker,
       responder,
       attackName: "锋击",
+      incomingDamage: 2,
       cards,
       onRespond: vi.fn(),
       onDecline: vi.fn(),
@@ -39,10 +40,46 @@ describe("Ember Pact response accessibility", () => {
     const decline = screen.getByRole("button", { name: "保留手牌 · 承受攻击" });
     expect(document.activeElement).toBe(deflect);
     expect(screen.getByRole("status").textContent).toContain("需要响应：初焰的「锋击」正攻向弦月");
+    expect(screen.getByText(/不响应预计损失 2 点生命/)).toBeTruthy();
 
     decline.focus();
     view.rerender(<ResponsePanel {...props} cards={[...cards]} />);
     expect(document.activeElement).toBe(decline);
+  });
+
+  it("warns when a response may be lethal", () => {
+    const state = createInitialState(fixedRandom);
+    const view = render(
+      <ResponsePanel
+        attacker={state.combatants[0]}
+        responder={state.combatants[1]}
+        attackName="锋击"
+        incomingDamage={state.combatants[1].hp}
+        cards={[{ uid: "test-deflect", definitionId: "deflect" }]}
+        onRespond={vi.fn()}
+        onDecline={vi.fn()}
+      />,
+    );
+
+    expect(view.getByText(/不响应预计损失 \d+ 点生命，可能直接退场/)).toBeTruthy();
+  });
+});
+
+describe("Ember Pact end turn confirmation", () => {
+  it("asks before discarding remaining actions and confirms the intent", () => {
+    const onConfirm = vi.fn();
+    const onCancel = vi.fn();
+    render(<EndTurnConfirm actionsRemaining={2} playableCards={3} onConfirm={onConfirm} onCancel={onCancel} />);
+
+    const dialog = screen.getByRole("alertdialog", { name: "行动力还没用完" });
+    expect(dialog.textContent).toContain("还有 2 点行动力与 3 张可出的牌");
+    const confirm = screen.getByRole("button", { name: "确认结束回合" });
+    expect(document.activeElement).toBe(confirm);
+
+    fireEvent.click(screen.getByRole("button", { name: "继续行动" }));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "确认结束回合" }));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 });
 

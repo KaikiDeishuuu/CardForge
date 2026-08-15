@@ -75,6 +75,13 @@
   line-height: 1;
 }
 
+.icon-button .speed-label {
+  font-family: var(--utility);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
 .battlefield {
   width: min(100%, 880px);
   min-height: 0;
@@ -782,6 +789,63 @@
   border: 1px solid rgba(36, 67, 72, 0.15);
   border-radius: 15px 3px 15px 3px;
   pointer-events: none;
+}
+
+.ledger-overlay--confirm {
+  z-index: 34;
+}
+
+.end-turn-confirm {
+  position: relative;
+  width: min(100%, 430px);
+  padding: 28px;
+  color: #f4efe2;
+  text-align: center;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(207, 156, 82, 0.16), transparent 42%),
+    #17383d;
+  border: 1px solid rgba(229, 217, 190, 0.24);
+  border-radius: 20px 5px 20px 5px;
+  box-shadow: 0 24px 70px rgba(4, 22, 24, 0.5);
+}
+
+.end-turn-confirm__mark {
+  width: 58px;
+  height: 58px;
+  margin: 0 auto 14px;
+  display: grid;
+  place-items: center;
+  color: #f2d6a0;
+  border: 1px solid rgba(219, 190, 132, 0.5);
+  border-radius: 50%;
+  font-family: var(--display);
+  font-size: 24px;
+}
+
+.end-turn-confirm > small {
+  color: #c59b5b;
+  font-family: var(--utility);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+
+.end-turn-confirm h2 {
+  margin: 10px 0 8px;
+  font-family: var(--display);
+  font-size: 26px;
+}
+
+.end-turn-confirm p {
+  margin: 0 0 22px;
+  color: #a9bfbc;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.end-turn-confirm > div:last-child {
+  display: grid;
+  gap: 8px;
 }
 
 .forge-ledger__header {
@@ -2256,6 +2320,52 @@
   color: #536966;
   font-size: 10px;
   font-style: normal;
+}
+
+.profile-reset {
+  position: relative;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(45, 76, 78, 0.15);
+  text-align: right;
+}
+
+.profile-reset__trigger,
+.profile-reset__confirm button {
+  min-height: 34px;
+  padding: 0 14px;
+  color: #8e433c;
+  background: transparent;
+  border: 1px solid rgba(142, 67, 60, 0.4);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.profile-reset__trigger:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.profile-reset > p {
+  margin: 8px 0 0;
+  color: #6f7d7a;
+  font-size: 10px;
+}
+
+.profile-reset__confirm {
+  display: flex;
+  align-items: center;
+  justify-content: end;
+  gap: 8px;
+}
+
+.profile-reset__confirm span {
+  margin-right: auto;
+  color: #6f5736;
+  font-size: 11px;
+  text-align: left;
 }
 
 @media (max-width: 680px) {

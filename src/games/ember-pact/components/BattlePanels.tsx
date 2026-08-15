@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useModalFocus } from "../../../shared/ui/useModalFocus";
 import { DIFFICULTY_NAMES, TEAM_NAMES } from "../domain/data";
 import { getCard } from "../domain/engine";
@@ -16,6 +16,8 @@ interface ResponsePanelProps {
   attacker: Combatant;
   responder: Combatant;
   attackName: string;
+  /** 扣除护盾后预计损失的生命，用于帮助决定是否交卸力。 */
+  incomingDamage: number;
   cards: readonly CardInstance[];
   onRespond: (cardUid: string) => void;
   onDecline: () => void;
@@ -25,6 +27,7 @@ export function ResponsePanel({
   attacker,
   responder,
   attackName,
+  incomingDamage,
   cards,
   onRespond,
   onDecline,
@@ -50,7 +53,11 @@ export function ResponsePanel({
       <div className="response-panel__copy">
         <small>敌方回合 · 你的响应</small>
         <strong id="response-title">{attacker.displayName}以「{attackName}」攻向{responder.displayName}</strong>
-        <p>卸力不会消耗你下回合的行动力，也可以保留手牌并承受攻击。</p>
+        <p>
+          {incomingDamage <= 0
+            ? "护盾足以吸收这次攻击，保留手牌通常更划算。"
+            : `不响应预计损失 ${incomingDamage} 点生命${incomingDamage >= responder.hp ? "，可能直接退场" : ""}；卸力不消耗你下回合的行动力。`}
+        </p>
       </div>
       <div className="response-panel__actions">
         {cards.map((instance, index) => {
@@ -72,6 +79,32 @@ export function ResponsePanel({
         <button ref={declineRef} type="button" className="response-decline" onClick={onDecline}>保留手牌 · 承受攻击</button>
       </div>
     </section>
+  );
+}
+
+interface EndTurnConfirmProps {
+  actionsRemaining: number;
+  playableCards: number;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+export function EndTurnConfirm({ actionsRemaining, playableCards, onConfirm, onCancel }: EndTurnConfirmProps) {
+  const modalRef = useModalFocus({ active: true, initialFocus: ".primary-button", onDismiss: onCancel });
+
+  return (
+    <div ref={modalRef} className="ledger-overlay ledger-overlay--confirm" role="alertdialog" aria-modal="true" aria-labelledby="end-turn-title" tabIndex={-1}>
+      <section className="end-turn-confirm">
+        <span className="end-turn-confirm__mark" aria-hidden="true">守</span>
+        <small>提前结束回合</small>
+        <h2 id="end-turn-title">行动力还没用完</h2>
+        <p>你还有 {actionsRemaining} 点行动力与 {playableCards} 张可出的牌；确认放弃这些行动吗？</p>
+        <div>
+          <button type="button" className="primary-button" onClick={onConfirm}>确认结束回合</button>
+          <button type="button" className="secondary-button" onClick={onCancel}>继续行动</button>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -148,6 +181,7 @@ export interface ProfileOverview {
   readonly wins: number;
   readonly losses: number;
   readonly draws: number;
+  readonly abandons: number;
   readonly currentStreak: number;
   readonly bestStreak: number;
   readonly fastestWinRound?: number;
@@ -157,11 +191,14 @@ export interface ProfileOverview {
 
 interface ProfilePanelProps {
   profile: ProfileOverview;
+  canResetProfile: boolean;
+  onResetProfile: () => void;
   onClose: () => void;
 }
 
-export function ProfilePanel({ profile, onClose }: ProfilePanelProps) {
+export function ProfilePanel({ profile, canResetProfile, onResetProfile, onClose }: ProfilePanelProps) {
   const modalRef = useModalFocus({ active: true, initialFocus: "button", onDismiss: onClose });
+  const [confirmReset, setConfirmReset] = useState(false);
   const winRate = profile.completed === 0 ? "—" : `${Math.round((profile.wins / profile.completed) * 100)}%`;
 
   return (
@@ -176,7 +213,7 @@ export function ProfilePanel({ profile, onClose }: ProfilePanelProps) {
         <div className="profile-summary">
           <span><small>完成对局</small><b>{profile.completed}</b></span>
           <span><small>胜率</small><b>{winRate}</b></span>
-          <span><small>胜 / 负 / 和</small><b>{profile.wins}/{profile.losses}/{profile.draws}</b></span>
+          <span><small>胜 / 负 / 和 / 弃</small><b>{profile.wins}/{profile.losses}/{profile.draws}/{profile.abandons}</b></span>
           <span><small>当前 / 最佳连胜</small><b>{profile.currentStreak}/{profile.bestStreak}</b></span>
           <span><small>最快胜利</small><b>{profile.fastestWinRound ? `${profile.fastestWinRound} 轮` : "—"}</b></span>
         </div>
@@ -197,6 +234,21 @@ export function ProfilePanel({ profile, onClose }: ProfilePanelProps) {
               <em>{character.bestDifficulty ? `${DIFFICULTY_NAMES[character.bestDifficulty]}通关` : "等待首胜"}</em>
             </article>
           ))}
+        </div>
+
+        <div className="profile-reset">
+          {confirmReset ? (
+            <div className="profile-reset__confirm" role="group" aria-label="确认清空争焰记录">
+              <span>清空后将无法恢复本机战绩。</span>
+              <button type="button" onClick={() => { onResetProfile(); setConfirmReset(false); }}>确认清空</button>
+              <button type="button" onClick={() => setConfirmReset(false)}>取消</button>
+            </div>
+          ) : (
+            <>
+              <button type="button" className="profile-reset__trigger" disabled={!canResetProfile} onClick={() => setConfirmReset(true)}>清空本机战绩</button>
+              {!canResetProfile && <p>结束或离开当前对局后可以清空战绩。</p>}
+            </>
+          )}
         </div>
       </section>
     </div>
