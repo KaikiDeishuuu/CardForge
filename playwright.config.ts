@@ -23,7 +23,19 @@ export default defineConfig({
   },
   projects: [
     {
+      name: "mobile-compact",
+      grep: /@dingding-(?:layout|response)/,
+      use: {
+        // Keep Chromium semantics across projects; only the viewport models the
+        // original 320×568 iPhone SE constraint.
+        ...devices["Pixel 5"],
+        viewport: { width: 320, height: 568 },
+        ...localChrome,
+      },
+    },
+    {
       name: "mobile",
+      grepInvert: /@dingding-layout/,
       use: {
         ...devices["Pixel 5"],
         viewport: { width: 390, height: 844 },
@@ -31,7 +43,17 @@ export default defineConfig({
       },
     },
     {
+      name: "mobile-landscape",
+      grep: /@dingding-(?:layout|response)/,
+      use: {
+        ...devices["Pixel 5"],
+        viewport: { width: 844, height: 390 },
+        ...localChrome,
+      },
+    },
+    {
       name: "laptop",
+      grepInvert: /@dingding-layout/,
       use: {
         viewport: { width: 1366, height: 768 },
         ...localChrome,
@@ -39,6 +61,7 @@ export default defineConfig({
     },
     {
       name: "desktop",
+      grepInvert: /@dingding-(?:layout|response)/,
       use: {
         viewport: { width: 1440, height: 1000 },
         ...localChrome,

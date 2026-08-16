@@ -9,12 +9,20 @@ import {
   installEmberPactSave,
   installFutureEmberPactSave,
 } from "./emberPactFixtures";
+import { createHumanSkillResponseRoot, installDingDingSave } from "./dingDingFixtures";
 import { installClassicBettingSave } from "./twentyOneFixtures";
 
 function collectPageErrors(page: Page) {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   return () => expect(errors, "页面不应产生未处理异常").toEqual([]);
+}
+
+async function measurableBox(locator: Locator, message: string) {
+  await expect(locator, message).toBeVisible();
+  const box = await locator.boundingBox();
+  expect(box, `${message}应具有可测量边界`).not.toBeNull();
+  return box!;
 }
 
 async function expectNoDocumentOverflow(page: Page, checkVertical = false) {
@@ -33,18 +41,86 @@ async function expectNoDocumentOverflow(page: Page, checkVertical = false) {
   }
 }
 
-async function expectElementWithinViewport(page: Page, locator: Locator) {
-  await expect(locator).toBeVisible();
-  const box = await locator.boundingBox();
+async function expectElementWithinViewport(
+  page: Page,
+  locator: Locator,
+  checkInternalHorizontalOverflow = true,
+) {
+  const box = await measurableBox(locator, "元素");
   const viewport = page.viewportSize();
-  expect(box, "元素应具有可测量边界").not.toBeNull();
   expect(viewport, "测试项目应提供固定视口").not.toBeNull();
-  expect(box!.x, "元素左侧不应超出视口").toBeGreaterThanOrEqual(-1);
-  expect(box!.y, "元素顶部不应超出视口").toBeGreaterThanOrEqual(-1);
-  expect(box!.x + box!.width, "元素右侧不应超出视口").toBeLessThanOrEqual(viewport!.width + 1);
-  expect(box!.y + box!.height, "元素底部不应超出视口").toBeLessThanOrEqual(viewport!.height + 1);
-  const horizontalOverflow = await locator.evaluate((element) => element.scrollWidth - element.clientWidth);
-  expect(horizontalOverflow, "面板内部不应产生横向滚动").toBeLessThanOrEqual(1);
+  expect(box.x, "元素左侧不应超出视口").toBeGreaterThanOrEqual(-1);
+  expect(box.y, "元素顶部不应超出视口").toBeGreaterThanOrEqual(-1);
+  expect(box.x + box.width, "元素右侧不应超出视口").toBeLessThanOrEqual(viewport!.width + 1);
+  expect(box.y + box.height, "元素底部不应超出视口").toBeLessThanOrEqual(viewport!.height + 1);
+  if (checkInternalHorizontalOverflow) {
+    const horizontalOverflow = await locator.evaluate((element) => element.scrollWidth - element.clientWidth);
+    expect(horizontalOverflow, "面板内部不应产生横向滚动").toBeLessThanOrEqual(1);
+  }
+}
+
+async function expectElementWithinContainer(
+  element: Locator,
+  container: Locator,
+  message: string,
+  tolerance = 1,
+) {
+  const [elementBox, containerBox] = await Promise.all([
+    measurableBox(element, message),
+    measurableBox(container, `${message}的容器`),
+  ]);
+
+  expect(elementBox.x, `${message}左侧不应越出容器`).toBeGreaterThanOrEqual(containerBox.x - tolerance);
+  expect(elementBox.y, `${message}顶部不应越出容器`).toBeGreaterThanOrEqual(containerBox.y - tolerance);
+  expect(elementBox.x + elementBox.width, `${message}右侧不应越出容器`).toBeLessThanOrEqual(
+    containerBox.x + containerBox.width + tolerance,
+  );
+  expect(elementBox.y + elementBox.height, `${message}底部不应越出容器`).toBeLessThanOrEqual(
+    containerBox.y + containerBox.height + tolerance,
+  );
+}
+
+async function expectNoVisualOverlap(
+  first: Locator,
+  second: Locator,
+  message: string,
+  tolerance = 1,
+) {
+  const [firstBox, secondBox] = await Promise.all([
+    measurableBox(first, message),
+    measurableBox(second, message),
+  ]);
+  const horizontalOverlap = Math.max(
+    0,
+    Math.min(firstBox.x + firstBox.width, secondBox.x + secondBox.width)
+      - Math.max(firstBox.x, secondBox.x),
+  );
+  const verticalOverlap = Math.max(
+    0,
+    Math.min(firstBox.y + firstBox.height, secondBox.y + secondBox.height)
+      - Math.max(firstBox.y, secondBox.y),
+  );
+
+  // A shared sub-pixel border is harmless; a real overlap has depth on both axes.
+  expect(
+    Math.min(horizontalOverlap, verticalOverlap),
+    `${message}（横向交叠 ${horizontalOverlap.toFixed(1)}px，纵向交叠 ${verticalOverlap.toFixed(1)}px）`,
+  ).toBeLessThanOrEqual(tolerance);
+}
+
+async function expectMinimumHitArea(locator: Locator, message: string) {
+  const box = await measurableBox(locator, message);
+  expect(box.width, `${message}宽度应至少为 44px`).toBeGreaterThanOrEqual(43.5);
+  expect(box.height, `${message}高度应至少为 44px`).toBeGreaterThanOrEqual(43.5);
+}
+
+async function settleLayout(page: Page) {
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+  });
 }
 
 async function enterGame(page: Page, id: "ember-pact" | "twenty-one" | "guandan" | "dingding") {
@@ -429,13 +505,130 @@ test("定鼎身份局可以入席并展示四席暗局", async ({ page }) => {
   await expect(page.locator(".ding-seat")).toHaveCount(4);
   await expect(page.getByRole("region", { name: "你的手牌" })).toBeVisible();
 
-  await page.getByRole("button", { name: "查看规则" }).click();
+  const rulesTrigger = page.getByRole("button", { name: "查看规则" });
+  const moreTrigger = page.getByRole("button", { name: "更多选项" });
+  if (!await rulesTrigger.isVisible()) {
+    await moreTrigger.click();
+  }
+  await rulesTrigger.click();
   const rules = page.getByRole("dialog", { name: /四席暗局/ });
   await expect(rules).toBeVisible();
+  await expect(page.locator(".cf-game-shell__surface")).toHaveAttribute("inert", "");
   await expect(rules.getByText("无懈", { exact: true })).toBeVisible();
   await expect(rules.getByText("约斗", { exact: true })).toBeVisible();
   await expect(rules.getByText("武将", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "关闭规则" }).click();
+  await expect(page.locator(".cf-game-shell__surface")).not.toHaveAttribute("inert", "");
+  await expect(moreTrigger).toBeFocused();
+  assertNoPageErrors();
+});
+
+test("定鼎关键区块在极窄与手机横屏下不会互相覆盖", { tag: "@dingding-layout" }, async ({ page }) => {
+  const assertNoPageErrors = collectPageErrors(page);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await enterGame(page, "dingding");
+  await expect(page.getByRole("region", { name: "四席定鼎牌桌" })).toBeVisible();
+  await settleLayout(page);
+
+  const topbar = page.locator(".ding-topbar");
+  const back = topbar.getByRole("button", { name: /返回.*大厅/ });
+  const heading = topbar.locator(".cf-game-topbar__heading, .ding-title").first();
+  const tools = topbar.locator(".cf-game-topbar__tools, .ding-tools").first();
+  const primaryTool = topbar.getByRole("button", { name: /更多选项|查看规则/ }).first();
+  const table = page.getByRole("region", { name: "四席定鼎牌桌" });
+  const board = table.locator(".ding-board");
+  const center = board.locator(".ding-center");
+  const interactionDock = page.locator(".ding-response:visible, .ding-hand-dock:visible").first();
+  const actionBar = interactionDock.locator(".ding-response__actions:visible, .ding-actions:visible").last();
+
+  await expectNoDocumentOverflow(page, true);
+  await expectElementWithinViewport(page, topbar);
+  await expectElementWithinViewport(page, back);
+  await expectElementWithinViewport(page, heading);
+  await expectElementWithinViewport(page, tools);
+  await expectMinimumHitArea(back, "返回按钮");
+  await expectMinimumHitArea(primaryTool, "顶栏工具按钮");
+  const headingBox = await measurableBox(heading, "定鼎标题区");
+  expect(headingBox.width, "标题区不应被两侧工具挤压至不可读").toBeGreaterThanOrEqual(72);
+  await expectNoVisualOverlap(back, heading, "返回按钮与标题区不应重叠");
+  await expectNoVisualOverlap(heading, tools, "标题区与工具区不应重叠");
+
+  await expectElementWithinViewport(page, table);
+  await expectElementWithinViewport(page, interactionDock, false);
+  await expectElementWithinViewport(page, actionBar);
+  await expectElementWithinContainer(board, table, "定鼎核心牌桌");
+  await expectNoVisualOverlap(topbar, table, "顶栏与牌桌不应重叠");
+  await expectNoVisualOverlap(table, interactionDock, "牌桌与底部操作区不应重叠");
+
+  for (const layout of ["north", "east", "south", "west"] as const) {
+    const seat = board.locator(`.ding-seat--${layout}`);
+    await expectElementWithinViewport(page, seat, false);
+    await expectElementWithinContainer(seat, board, `${layout} 席位`);
+    await expectNoVisualOverlap(center, seat, `牌桌核心与 ${layout} 席位不应重叠`);
+  }
+
+  const actionButtons = actionBar.getByRole("button");
+  expect(await actionButtons.count(), "底部操作区应保留至少一个可操作按钮").toBeGreaterThan(0);
+  for (let index = 0; index < await actionButtons.count(); index += 1) {
+    const action = actionButtons.nth(index);
+    await expectElementWithinViewport(page, action);
+    await expectMinimumHitArea(action, `底部操作按钮 ${index + 1}`);
+  }
+  assertNoPageErrors();
+});
+
+test("定鼎复杂技能响应可以滚动且确认操作始终完整粘底", { tag: "@dingding-response" }, async ({ page }) => {
+  const assertNoPageErrors = collectPageErrors(page);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await installDingDingSave(page, createHumanSkillResponseRoot());
+  await page.goto("/?game=dingding");
+
+  const dock = page.getByRole("region", { name: "需要你响应" });
+  const response = dock.locator(".ding-response");
+  const responsePanel = response.locator(".ding-response__panel");
+  const scrollArea = response.locator(".ding-response__scroll");
+  const actionBar = response.locator(".ding-response__actions").last();
+  const target = response.getByRole("button", { name: "选择北座作为技能目标" });
+  const actionButtons = actionBar.getByRole("button");
+  await expect(response).toBeVisible();
+  await settleLayout(page);
+
+  await expectNoDocumentOverflow(page, true);
+  await expectElementWithinViewport(page, dock, false);
+  await expectElementWithinViewport(page, response);
+  await expectElementWithinViewport(page, actionBar);
+  await expectElementWithinContainer(response, dock, "技能响应区");
+  await expectElementWithinContainer(responsePanel, response, "技能响应面板");
+  await expectElementWithinContainer(scrollArea, responsePanel, "技能响应滚动区");
+  await expectElementWithinContainer(actionBar, response, "技能响应确认栏");
+  await expect(actionButtons).toHaveCount(2);
+  for (let index = 0; index < await actionButtons.count(); index += 1) {
+    const action = actionButtons.nth(index);
+    await expectElementWithinViewport(page, action);
+    await expectElementWithinContainer(action, actionBar, `技能响应按钮 ${index + 1}`);
+    await expectMinimumHitArea(action, `技能响应按钮 ${index + 1}`);
+  }
+  await expectNoVisualOverlap(scrollArea, actionBar, "响应滚动正文与固定确认栏不应重叠");
+
+  const overflow = await scrollArea.evaluate((element) => element.scrollHeight - element.clientHeight);
+  expect(overflow, "复杂技能响应应由内部滚动区承载").toBeGreaterThan(1);
+  const actionBeforeScroll = await measurableBox(actionBar, "滚动前的技能响应确认栏");
+  await scrollArea.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect.poll(() => scrollArea.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  const actionAfterScroll = await measurableBox(actionBar, "滚动后的技能响应确认栏");
+
+  expect(
+    Math.abs(actionAfterScroll.y - actionBeforeScroll.y),
+    "滚动响应内容时确认栏应保持粘底",
+  ).toBeLessThanOrEqual(1);
+  await expectElementWithinViewport(page, target);
+  await expectElementWithinContainer(target, scrollArea, "滚动后的技能目标");
+  await expectElementWithinViewport(page, actionBar);
+  await expectElementWithinContainer(actionBar, responsePanel, "滚动后的技能响应确认栏");
+  await expectNoVisualOverlap(scrollArea, actionBar, "滚动后的响应正文与固定确认栏不应重叠");
+  await expectNoVisualOverlap(target, actionBar, "技能目标与粘性确认栏不应重叠");
   assertNoPageErrors();
 });
 

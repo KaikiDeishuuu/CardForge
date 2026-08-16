@@ -1,0 +1,77 @@
+:root {
+  /* Typography */
+  --cf-font-sans: "Avenir Next", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --cf-font-display: "Bodoni 72", "Didot", "Songti SC", "Noto Serif CJK SC", serif;
+  --cf-font-mono: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
+
+  --cf-font-size-xs: 0.75rem;
+  --cf-font-size-sm: 0.8125rem;
+  --cf-font-size-md: 0.9375rem;
+  --cf-font-size-lg: 1.125rem;
+  --cf-font-size-xl: 1.375rem;
+  --cf-font-size-2xl: clamp(1.5rem, 3vw, 2rem);
+  --cf-line-height-tight: 1.2;
+  --cf-line-height-normal: 1.5;
+  --cf-line-height-relaxed: 1.7;
+
+  /* A quiet, semantic palette. A game may override only --cf-color-accent. */
+  --cf-color-canvas: #eef1ef;
+  --cf-color-surface: #f8f7f2;
+  --cf-color-surface-raised: #fffef9;
+  --cf-color-table: #173d39;
+  --cf-color-table-subtle: #214a45;
+  --cf-color-text: #17221f;
+  --cf-color-text-muted: #63706c;
+  --cf-color-text-on-table: #f4f7f4;
+  --cf-color-text-on-table-muted: #bdcbc7;
+  --cf-color-border: rgb(23 34 31 / 14%);
+  --cf-color-border-on-table: rgb(255 255 255 / 16%);
+  --cf-color-accent: #a94b3b;
+  --cf-color-accent-contrast: #fff;
+  --cf-color-focus: #f0b64d;
+  --cf-color-focus-contrast: #102f2c;
+  --cf-color-success: #2f7a5c;
+  --cf-color-warning: #a76a1d;
+  --cf-color-danger: #b7473f;
+  --cf-color-scrim: rgb(8 19 17 / 58%);
+
+  /* Spacing: a compact 4px-based scale. */
+  --cf-space-0: 0;
+  --cf-space-1: 0.25rem;
+  --cf-space-2: 0.5rem;
+  --cf-space-3: 0.75rem;
+  --cf-space-4: 1rem;
+  --cf-space-5: 1.25rem;
+  --cf-space-6: 1.5rem;
+  --cf-space-8: 2rem;
+  --cf-space-10: 2.5rem;
+  --cf-space-12: 3rem;
+  --cf-space-16: 4rem;
+
+  /* Control and touch sizing. */
+  --cf-control-height-sm: 2.25rem;
+  --cf-control-height-md: 2.75rem;
+  --cf-control-height-lg: 3rem;
+  --cf-touch-target: 2.75rem;
+
+  /* Shape and elevation. */
+  --cf-radius-sm: 0.5rem;
+  --cf-radius-md: 0.75rem;
+  --cf-radius-lg: 0.75rem;
+  --cf-radius-pill: 999px;
+  --cf-shadow-sm: 0 1px 2px rgb(8 19 17 / 10%);
+  --cf-shadow-md: 0 8px 24px rgb(8 19 17 / 16%);
+  --cf-shadow-dialog: 0 20px 60px rgb(8 19 17 / 28%);
+
+  /* Shared stacking order. Local game artwork should stay below sticky UI. */
+  --cf-z-base: 0;
+  --cf-z-sticky: 10;
+  --cf-z-action-dock: 20;
+  --cf-z-menu: 100;
+  --cf-z-dialog: 200;
+  --cf-z-toast: 300;
+
+  /* Shared shell dimensions. */
+  --cf-topbar-height: 3.75rem;
+  --cf-content-max-width: 90rem;
+}

@@ -13,6 +13,8 @@ interface ModalFocusOptions {
   active: boolean;
   initialFocus?: string;
   onDismiss?: () => void;
+  restoreFocus?: string;
+  trapFocus?: boolean;
 }
 
 function getFocusableElements(container: HTMLElement): HTMLElement[] {
@@ -20,7 +22,13 @@ function getFocusableElements(container: HTMLElement): HTMLElement[] {
     .filter((element) => element.getClientRects().length > 0);
 }
 
-export function useModalFocus({ active, initialFocus, onDismiss }: ModalFocusOptions) {
+export function useModalFocus({
+  active,
+  initialFocus,
+  onDismiss,
+  restoreFocus,
+  trapFocus = true,
+}: ModalFocusOptions) {
   const modalRef = useRef<HTMLDivElement>(null);
   const onDismissRef = useRef(onDismiss);
 
@@ -34,8 +42,9 @@ export function useModalFocus({ active, initialFocus, onDismiss }: ModalFocusOpt
     if (!active || !modalRef.current) return;
 
     const modal = modalRef.current;
-    const previousFocus = document.activeElement instanceof HTMLElement
-      ? document.activeElement
+    const activeElement = document.activeElement;
+    const previousFocus = activeElement instanceof HTMLElement && activeElement !== document.body
+      ? activeElement
       : undefined;
     const preferred = initialFocus
       ? modal.querySelector<HTMLElement>(initialFocus)
@@ -50,7 +59,7 @@ export function useModalFocus({ active, initialFocus, onDismiss }: ModalFocusOpt
         return;
       }
 
-      if (event.key !== "Tab") return;
+      if (!trapFocus || event.key !== "Tab") return;
 
       const focusable = getFocusableElements(modal);
       if (focusable.length === 0) {
@@ -77,9 +86,13 @@ export function useModalFocus({ active, initialFocus, onDismiss }: ModalFocusOpt
     document.addEventListener("keydown", handleKeyDown, true);
     return () => {
       document.removeEventListener("keydown", handleKeyDown, true);
-      if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+      const fallbackFocus = restoreFocus
+        ? document.querySelector<HTMLElement>(restoreFocus)
+        : undefined;
+      const returnTarget = previousFocus?.isConnected ? previousFocus : fallbackFocus;
+      if (returnTarget?.isConnected) returnTarget.focus({ preventScroll: true });
     };
-  }, [active, initialFocus]);
+  }, [active, initialFocus, restoreFocus, trapFocus]);
 
   return modalRef;
 }

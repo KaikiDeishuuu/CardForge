@@ -1,7 +1,15 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { GameRuntimeProps } from "../../core/games/types";
 import { useSound } from "../../shared/audio/SoundProvider";
 import { playbackDelay, usePlaybackSpeed } from "../../shared/settings/usePlaybackSpeed";
+import {
+  ActionDock,
+  Dialog,
+  GameShell,
+  GameTopBar,
+  ToolMenu,
+  type GameToolAction,
+} from "../../shared/ui/GameShell";
 import { useModalFocus } from "../../shared/ui/useModalFocus";
 import {
   DING_DIFFICULTY_NAMES,
@@ -61,53 +69,73 @@ const SEAT_LAYOUT: Readonly<Record<PlayerId, string>> = {
   south: "south",
 };
 
-function DingProfilePanel({ profile, onClose }: {
+const IMPLICIT_TARGET_CARD_TYPES = new Set<DingCard["type"]>([
+  "salve",
+  "focus",
+  "horde",
+  "volley",
+  "grove",
+  "weapon",
+  "armor",
+  "minus-horse",
+  "plus-horse",
+]);
+
+function DingResponsePanel({ children, actions }: {
+  children: ReactNode;
+  actions: ReactNode;
+}) {
+  return (
+    <div className="ding-response__panel">
+      <div className="ding-response__scroll">{children}</div>
+      <div className="ding-response__actions" role="group" aria-label="响应操作">
+        {actions}
+      </div>
+    </div>
+  );
+}
+
+function DingProfilePanel({ profile }: {
   profile: DingRootState["lifetimeProfile"];
-  onClose: () => void;
 }) {
   const winRate = profile.gamesPlayed === 0
     ? "—"
     : `${Math.round((profile.wins / profile.gamesPlayed) * 100)}%`;
   return (
-    <div className="ding-profile" role="dialog" aria-modal="true" aria-labelledby="ding-profile-title" tabIndex={-1}>
-      <article>
-        <button type="button" className="ding-profile__close" onClick={onClose} aria-label="关闭定鼎战绩">×</button>
-        <small>DING ARCHIVE</small>
-        <h2 id="ding-profile-title">定鼎战绩</h2>
-        <div className="ding-profile__summary">
-          <span><small>完成对局</small><strong>{profile.gamesPlayed}</strong></span>
-          <span><small>获胜</small><strong>{profile.wins}</strong></span>
-          <span><small>胜率</small><strong>{winRate}</strong></span>
+    <div className="ding-profile">
+      <div className="ding-profile__summary">
+        <span><small>完成对局</small><strong>{profile.gamesPlayed}</strong></span>
+        <span><small>获胜</small><strong>{profile.wins}</strong></span>
+        <span><small>胜率</small><strong>{winRate}</strong></span>
+      </div>
+      <section>
+        <h3>身份胜率</h3>
+        <div className="ding-profile__grid">
+          {(Object.keys(profile.identityRecords) as Array<keyof typeof profile.identityRecords>).map((identity) => {
+            const record = profile.identityRecords[identity];
+            return (
+              <span key={identity}>
+                <b>{IDENTITY_NAMES[identity]}</b>
+                <small>{record.wins} 胜 / {record.games} 局</small>
+              </span>
+            );
+          })}
         </div>
-        <section>
-          <h3>身份胜率</h3>
-          <div className="ding-profile__grid">
-            {(Object.keys(profile.identityRecords) as Array<keyof typeof profile.identityRecords>).map((identity) => {
-              const record = profile.identityRecords[identity];
-              return (
-                <span key={identity}>
-                  <b>{IDENTITY_NAMES[identity]}</b>
-                  <small>{record.wins} 胜 / {record.games} 局</small>
-                </span>
-              );
-            })}
-          </div>
-        </section>
-        <section>
-          <h3>武将胜率</h3>
-          <div className="ding-profile__grid">
-            {(Object.keys(profile.heroRecords) as Array<HeroId>).map((heroId) => {
-              const record = profile.heroRecords[heroId];
-              return (
-                <span key={heroId}>
-                  <b>{HERO_CATALOG[heroId].name}</b>
-                  <small>{record.wins} 胜 / {record.games} 局</small>
-                </span>
-              );
-            })}
-          </div>
-        </section>
-      </article>
+      </section>
+      <section>
+        <h3>武将胜率</h3>
+        <div className="ding-profile__grid">
+          {(Object.keys(profile.heroRecords) as Array<HeroId>).map((heroId) => {
+            const record = profile.heroRecords[heroId];
+            return (
+              <span key={heroId}>
+                <b>{HERO_CATALOG[heroId].name}</b>
+                <small>{record.wins} 胜 / {record.games} 局</small>
+              </span>
+            );
+          })}
+        </div>
+      </section>
     </div>
   );
 }
@@ -123,38 +151,37 @@ function DingHeroDraft({ options, onChoose, onExit }: {
   onChoose: (heroId: HeroId) => void;
   onExit: () => void;
 }) {
-  const focusRef = useModalFocus({
-    active: true,
-    initialFocus: ".ding-draft__heroes button",
-    onDismiss: onExit,
-  });
   return (
-    <div ref={focusRef} className="ding-modal" role="dialog" aria-modal="true" aria-labelledby="ding-draft-title" tabIndex={-1}>
-      <article className="ding-draft">
-        <small>DING HERO DRAFT</small>
-        <h2 id="ding-draft-title">三选一 · 选择武将</h2>
-        <p>身份仍然随机分配。三名 AI 会从其余武将中各自补位，四席武将互不重复。</p>
-        <div className="ding-draft__heroes">
-          {options.map((heroId) => {
-            const hero = HERO_CATALOG[heroId];
-            return (
-              <button
-                key={heroId}
-                type="button"
-                onClick={() => onChoose(heroId)}
-                aria-label={`选择武将${hero.name}`}
-              >
-                <b>{hero.name}</b>
-                <i>{hero.title} · {hero.skillName}</i>
-                <span>{hero.description}</span>
-                <em>{hero.maxHp} 体力</em>
-              </button>
-            );
-          })}
-        </div>
-        <button type="button" className="ding-draft__exit" onClick={onExit}>返回大厅</button>
-      </article>
-    </div>
+    <Dialog
+      open
+      title="三选一 · 选择武将"
+      className="ding-draft"
+      initialFocus=".ding-draft__heroes button"
+      onClose={onExit}
+      dismissOnBackdrop={false}
+      closeLabel="返回游戏大厅"
+      footer={<button type="button" className="ding-draft__exit" onClick={onExit}>返回大厅</button>}
+    >
+      <p>身份仍然随机分配。三名 AI 会从其余武将中各自补位，四席武将互不重复。</p>
+      <div className="ding-draft__heroes">
+        {options.map((heroId) => {
+          const hero = HERO_CATALOG[heroId];
+          return (
+            <button
+              key={heroId}
+              type="button"
+              onClick={() => onChoose(heroId)}
+              aria-label={`选择武将${hero.name}`}
+            >
+              <b>{hero.name}</b>
+              <i>{hero.title} · {hero.skillName}</i>
+              <span>{hero.description}</span>
+              <em>{hero.maxHp} 体力</em>
+            </button>
+          );
+        })}
+      </div>
+    </Dialog>
   );
 }
 
@@ -188,10 +215,11 @@ function frameLabel(frame: ResolutionFrame, state: DingState): string {
   }
 }
 
-function Seat({ player, active, targetable, delayedCards, onTarget, onInspect, selectionActive }: {
+function Seat({ player, active, targetable, selected, delayedCards, onTarget, onInspect, selectionActive }: {
   player: DingPlayer;
   active: boolean;
   targetable: boolean;
+  selected: boolean;
   selectionActive: boolean;
   delayedCards: readonly DingCard[];
   onTarget: (id: PlayerId) => void;
@@ -205,13 +233,25 @@ function Seat({ player, active, targetable, delayedCards, onTarget, onInspect, s
     player.equipment.minusHorse,
     player.equipment.plusHorse,
   ].filter((card): card is DingCard => Boolean(card));
+  const selectionLabel = selected
+    ? "，已选为当前目标"
+    : targetable
+      ? "，可选为目标"
+      : selectionActive
+        ? "，不可选为当前卡牌目标"
+        : "";
+  const stateBadgeLabel = targetable
+    ? `${active ? "行动 · " : ""}${selected ? "已选" : "可选"}`
+    : active ? "行动" : undefined;
 
   return (
     <button
       type="button"
-      className={`ding-seat ding-seat--${SEAT_LAYOUT[player.id]} ${active ? "is-active" : ""} ${targetable ? "is-targetable" : ""} ${selectionActive && !targetable ? "is-invalid" : ""} ${!player.alive ? "is-dead" : ""}`}
+      className={`ding-seat ding-seat--${SEAT_LAYOUT[player.id]} ${active ? "is-active" : ""} ${targetable ? "is-targetable" : ""} ${selected ? "is-selected" : ""} ${selectionActive && !targetable ? "is-invalid" : ""} ${!player.alive ? "is-dead" : ""}`}
+      disabled={selectionActive && !targetable}
       onClick={() => targetable ? onTarget(player.id) : onInspect(player.id)}
-      aria-label={`${player.displayName}，${identity}，${hero ? `${hero.name}·${hero.skillName}` : "无武将"}，体力 ${player.hp}/${player.maxHp}，${player.hand.length} 张手牌${targetable ? "，可选为目标" : ""}`}
+      aria-pressed={selectionActive ? selected : undefined}
+      aria-label={`${player.displayName}，${identity}，${hero ? `${hero.name}·${hero.skillName}` : "无武将"}，体力 ${player.hp}/${player.maxHp}，${player.hand.length} 张手牌${selectionLabel}`}
     >
       <span className="ding-seat__mark" aria-hidden="true">{player.revealed ? IDENTITY_NAMES[player.identity].slice(0, 1) : "隐"}</span>
       <span className="ding-seat__copy">
@@ -225,8 +265,11 @@ function Seat({ player, active, targetable, delayedCards, onTarget, onInspect, s
       <span className="ding-seat__equipment" aria-hidden="true">
         {equipment.map((card) => <b key={card.id} title={`${card.name}：${card.description}`}>{card.symbol}</b>)}
       </span>
-      {active && <span className="ding-seat__turn">行动</span>}
-      {targetable && <span className="ding-seat__target">可选</span>}
+      {stateBadgeLabel && (
+        <span className={targetable ? "ding-seat__target" : "ding-seat__turn"}>
+          {stateBadgeLabel}
+        </span>
+      )}
     </button>
   );
 }
@@ -257,6 +300,7 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
     });
   }
   const [showLog, setShowLog] = useState(false);
+  const [showTools, setShowTools] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [resultLogMode, setResultLogMode] = useState<"key" | "full">("key");
   const [selectedCardUid, setSelectedCardUid] = useState<string>();
@@ -271,20 +315,6 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
   const [restoredNotice, setRestoredNotice] = useState(Boolean(restored));
   const { enabled: soundEnabled, toggle: toggleSound, play: playSound } = useSound();
   const { speed: playbackSpeed, cycle: cyclePlaybackSpeed } = usePlaybackSpeed();
-  const rulesRef = useModalFocus({
-    active: showRules,
-    initialFocus: ".ding-rules__enter",
-    onDismiss: () => setShowRules(false),
-  });
-  const profileRef = useModalFocus({
-    active: showProfile,
-    initialFocus: ".ding-profile__close",
-    onDismiss: () => setShowProfile(false),
-  });
-  const resultRef = useModalFocus({
-    active: state.status === "finished" && !showRules,
-    initialFocus: ".ding-result__actions button",
-  });
 
   const human = state.players.find((player) => player.controller === "human")!;
   const active = state.players.find((player) => player.id === state.activePlayerId)!;
@@ -294,6 +324,16 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
     ? getPlayableCards(state, human.id)
     : [];
   const targetOptions = selectedCard ? getTargetOptions(state, human.id, selectedCard) : [];
+  const selectedCardUsesImplicitTarget = Boolean(selectedCard && IMPLICIT_TARGET_CARD_TYPES.has(selectedCard.type));
+  const seatTargetOptions = selectedCardUsesImplicitTarget ? [] : targetOptions;
+  const effectiveTargetId = targetOptions.length === 1
+    ? targetOptions[0]
+    : selectedTargetId && targetOptions.includes(selectedTargetId)
+      ? selectedTargetId
+      : undefined;
+  const selectedTarget = effectiveTargetId && seatTargetOptions.includes(effectiveTargetId)
+    ? state.players.find((player) => player.id === effectiveTargetId)
+    : undefined;
   const pendingStrike = stackTop?.kind === "strike" ? stackTop : undefined;
   const pendingDying = stackTop?.kind === "dying" ? stackTop : undefined;
   const pendingSkill = stackTop?.kind === "skill" ? stackTop : undefined;
@@ -345,7 +385,7 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
   const humanRespondingVolley = volleyResponder === human.id;
   const humanRespondingProtect = pendingProtect?.protectorId === human.id;
   const humanRespondingProbe = pendingProbe?.actorId === human.id;
-  const overlayOpen = showRules || showLog || showProfile || state.status === "finished" || Boolean(heroDraft);
+  const overlayOpen = showTools || showRules || showLog || showProfile || state.status === "finished" || Boolean(heroDraft);
   const pendingHumanResponse = humanRespondingStrike
     || humanRespondingDying
     || humanRespondingSkill
@@ -355,6 +395,38 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
     || humanRespondingVolley
     || humanRespondingProtect
     || humanRespondingProbe;
+  const responseFocusActive = pendingHumanResponse && !overlayOpen;
+  const responseRef = useModalFocus({
+    active: responseFocusActive,
+    initialFocus: "[data-response-focus]",
+    trapFocus: false,
+  });
+  const responseWasActiveRef = useRef(false);
+
+  useEffect(() => {
+    if (!responseFocusActive) return;
+    const frame = window.requestAnimationFrame(() => {
+      responseRef.current?.querySelector<HTMLElement>("[data-response-focus]")
+        ?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [responseFocusActive, responseRef, state.revision]);
+
+  useEffect(() => {
+    const wasActive = responseWasActiveRef.current;
+    responseWasActiveRef.current = responseFocusActive;
+    if (!wasActive || responseFocusActive) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      if (document.activeElement && document.activeElement !== document.body) return;
+      document.querySelector<HTMLElement>([
+        ".ding-actions button:not([disabled])",
+        ".ding-table .ding-seat:not([disabled])",
+        ".ding-topbar button",
+      ].join(","))?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [responseFocusActive]);
 
   const shouldAutomate = state.status === "playing"
     && !overlayOpen
@@ -566,8 +638,11 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
       return;
     }
     if (!playableCards.some((card) => card.id === cardUid)) return;
-    setSelectedCardUid((current) => current === cardUid ? undefined : cardUid);
-    setSelectedTargetId(undefined);
+    const nextCardUid = selectedCardUid === cardUid ? undefined : cardUid;
+    const nextCard = nextCardUid ? human.hand.find((card) => card.id === nextCardUid) : undefined;
+    const nextTargets = nextCard ? getTargetOptions(state, human.id, nextCard) : [];
+    setSelectedCardUid(nextCardUid);
+    setSelectedTargetId(nextTargets.length === 1 ? nextTargets[0] : undefined);
     setNotice(undefined);
     playSound("tap");
   }
@@ -579,14 +654,14 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
       playSound("tap");
       return;
     }
-    setSelectedTargetId(id);
+    setSelectedTargetId((current) => current === id ? undefined : id);
     setNotice(undefined);
     playSound("tap");
   }
 
   function playSelection() {
     if (!selectedCardUid || !humanCanPlay) return;
-    const targetId = targetOptions.length === 1 ? targetOptions[0] : selectedTargetId;
+    const targetId = effectiveTargetId;
     if (!targetId || !targetOptions.includes(targetId)) {
       setNotice("请先选择一名金色高亮的角色。");
       return;
@@ -664,20 +739,232 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
               : state.lastAction?.text ?? "等待行动。";
   const required = humanDiscarding ? requiredDiscards(state, human.id) : 0;
   const discardReady = humanDiscarding && discardSelection.length === required;
+  const playSelectionReady = Boolean(
+    humanCanPlay
+      && selectedCard
+      && effectiveTargetId
+      && targetOptions.includes(effectiveTargetId),
+  );
+  const playActionLabel = selectedCard
+    ? selectedCardUsesImplicitTarget
+      ? `使用「${selectedCard.name}」`
+      : selectedTarget
+      ? `对${selectedTarget.displayName}出牌`
+      : "请先选择目标"
+    : "出牌";
+
+  const gameStatus = state.status === "finished"
+    ? "本局已结束"
+    : overlayOpen
+      ? "已暂停 · 关闭面板继续"
+      : pendingHumanResponse
+        ? "等待你的响应"
+        : state.stack.length > 0
+          ? `正在结算 · ${stackTop ? frameLabel(stackTop, state) : "牌局行动"}`
+        : active.controller === "ai"
+          ? `${active.displayName}思考中 · ${phaseLabel(state.phase)}`
+          : humanDiscarding
+            ? `轮到你 · 请选择 ${required} 张弃牌`
+            : `轮到你 · ${phaseLabel(state.phase)}阶段`;
+
+  const toolActions: readonly GameToolAction[] = [
+    {
+      id: "log",
+      label: "牌局记录",
+      description: "查看本局最近行动",
+      icon: "≡",
+      onSelect: () => setShowLog(true),
+    },
+    {
+      id: "rules",
+      label: "查看规则",
+      description: "身份、牌型与胜负条件",
+      icon: "?",
+      onSelect: () => setShowRules(true),
+    },
+    {
+      id: "profile",
+      label: "定鼎战绩",
+      description: "查看身份与武将记录",
+      icon: "▤",
+      onSelect: () => setShowProfile(true),
+    },
+    {
+      id: "speed",
+      label: `AI 速度 · ${playbackSpeed}×`,
+      description: "切换行动播放速度",
+      icon: `${playbackSpeed}×`,
+      onSelect: cyclePlaybackSpeed,
+    },
+    {
+      id: "sound",
+      label: soundEnabled ? "声音 · 开" : "声音 · 关",
+      description: soundEnabled ? "点击关闭牌桌声音" : "点击开启牌桌声音",
+      icon: soundEnabled ? "♪" : "静",
+      pressed: soundEnabled,
+      onSelect: toggleSound,
+    },
+  ];
+
+  const gameOverlay = (
+    <>
+      <ToolMenu
+        open={showTools}
+        title="牌桌选项"
+        actions={toolActions}
+        onClose={() => setShowTools(false)}
+      />
+
+      {heroDraft && <DingHeroDraft options={heroDraft.options} onChoose={selectDraftHero} onExit={onExit} />}
+
+      <Dialog
+        open={showLog}
+        title="牌局记录"
+        className="ding-log"
+        onClose={() => setShowLog(false)}
+        closeLabel="关闭牌局记录"
+        restoreFocus=".cf-game-topbar__more"
+      >
+        <ol>{[...state.log].reverse().map((entry) => <li key={entry.id}>{entry.text}</li>)}</ol>
+      </Dialog>
+
+      <Dialog
+        open={showProfile}
+        title="定鼎战绩"
+        className="ding-profile-dialog"
+        onClose={() => setShowProfile(false)}
+        closeLabel="关闭定鼎战绩"
+        restoreFocus=".cf-game-topbar__more"
+      >
+        <DingProfilePanel profile={root.lifetimeProfile} />
+      </Dialog>
+
+      <Dialog
+        open={showRules}
+        title="四席暗局，先明主君，再定鼎。"
+        className="ding-rules"
+        onClose={() => setShowRules(false)}
+        closeLabel="关闭规则"
+        initialFocus=".ding-rules__enter"
+        restoreFocus=".cf-game-topbar__more"
+        footer={(
+          <button type="button" className="ding-rules__enter" onClick={() => { setShowRules(false); playSound("card"); }}>
+            入席开局
+          </button>
+        )}
+      >
+        <p className="ding-rules__intro">主君身份公开并多 1 点体力；其余三人身份隐藏。主君与辅臣要清剿叛锋与流谋；叛锋要在主君倒下时达阵；流谋必须成为主君倒下时唯一的其他存活者。</p>
+        <div className="ding-rules__grid">
+          <span><b>回合</b>准备 → 判定 → 摸 2 张 → 出牌 → 弃牌到手牌上限（等于当前体力）</span>
+          <span><b>刺击</b>攻击范围内每回合一次；目标可出「闪避」</span>
+          <span><b>疗元</b>受伤时自疗，或在任何人濒死时救援</span>
+          <span><b>锦囊</b>聚势/拆解/牵袭/约斗/合围/齐射/同袍/刺探先询问「无懈可击」，再进结算栈；拆解与牵袭可作用于手牌、装备或判定区</span>
+          <span><b>延时</b>断锋/困阵/焚营进入判定区，在判定阶段翻牌顶判定后结算</span>
+          <span><b>无懈</b>抵消一张锦囊；无懈本身可被另一张无懈反制，层层嵌套后自栈顶结算</span>
+          <span><b>约斗</b>目标先出「刺击」，双方轮流；先打不出的一方受对方 1 点伤害</span>
+          <span><b>合围 / 齐射</b>其他角色依次需出「刺击」/「闪避」，否则受 1 点伤害</span>
+          <span><b>武将</b>开局从三名武将中选一，AI 从其余武将补位；武将体力为 3 或 4，主君 +1，技能在回合、伤害、濒死或锦囊结算时触发</span>
+          <span><b>距离</b>相邻座位为 1；赤影 -1、磐影 +1、长锋射程 2、穿云射程 3；犀甲每回合首次受伤 -1</span>
+          <span><b>胜负</b>主君死时若只剩流谋则流谋胜，否则叛锋胜；叛锋与流谋全灭则主君方胜</span>
+          <span><b>奖惩</b>击退叛锋摸 3 张；流谋不取奖惩；主君误杀辅臣弃光手牌。主君倒下即终局</span>
+          <span><b>护主</b>主君被刺击且未闪避时，辅臣可弃 1 张手牌抵挡伤害，并公开身份</span>
+          <span><b>过载</b>第 24 轮起，每整轮对存活角色造成递增真实伤害，但不会致死</span>
+        </div>
+        <p className="ding-rules__scope">选将、身份与武将战绩、结算栈复盘、辅臣护主及三档身份 AI 均已启用。</p>
+        <div className="ding-difficulty" role="radiogroup" aria-label="对手难度">
+          <small>对手 AI 难度 · 对当前及后续牌局生效</small>
+          <div>
+            {DIFFICULTY_OPTIONS.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                role="radio"
+                aria-checked={state.difficulty === option.id}
+                className={state.difficulty === option.id ? "is-selected" : ""}
+                onClick={() => {
+                  transition((current) => changeDifficulty(current, option.id));
+                  playSound("tap");
+                }}
+              >
+                <strong>{DING_DIFFICULTY_NAMES[option.id]}</strong>
+                <span>{option.description}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </Dialog>
+
+      {state.status === "finished" && state.winner && (
+        <Dialog
+          open
+          title={WINNER_COPY[state.winner].title}
+          className="ding-result"
+          role="alertdialog"
+          dismissOnBackdrop={false}
+          initialFocus=".ding-result__actions button"
+          footer={(
+            <div className="ding-result__actions">
+              <button type="button" onClick={restart}>再来一局</button>
+              <button type="button" onClick={onExit}>返回大厅</button>
+            </div>
+          )}
+        >
+          <p>{WINNER_COPY[state.winner].detail}</p>
+          <div className="ding-result__identities">
+            {state.players.map((player) => {
+              const hero = HERO_CATALOG[player.heroId as HeroId];
+              return (
+                <span key={player.id}>
+                  <b>{player.displayName}</b>
+                  <small>{IDENTITY_NAMES[player.identity]}{hero ? ` · ${hero.name}` : ""}</small>
+                  <em title={hero?.description}>{hero?.skillName ?? ""} · {player.alive ? `${player.hp}/${player.maxHp}` : "退场"}</em>
+                </span>
+              );
+            })}
+          </div>
+          <div className="ding-result__review">
+            <header>
+              <strong>对局复盘</strong>
+              <div role="group" aria-label="复盘记录筛选">
+                <button type="button" className={resultLogMode === "key" ? "is-selected" : ""} aria-pressed={resultLogMode === "key"} onClick={() => setResultLogMode("key")}>关键节点</button>
+                <button type="button" className={resultLogMode === "full" ? "is-selected" : ""} aria-pressed={resultLogMode === "full"} onClick={() => setResultLogMode("full")}>完整记录</button>
+              </div>
+            </header>
+            <ol>
+              {[...state.log].reverse()
+                .filter((entry) => resultLogMode === "full" || [
+                  "退场", "濒死", "无懈", "判定", "跳过", "发动", "胜负", "赢下", "达成",
+                ].some((keyword) => entry.text.includes(keyword)))
+                .map((entry) => <li key={entry.id}><small>#{entry.id}</small><span>{entry.text}</span></li>)}
+            </ol>
+          </div>
+        </Dialog>
+      )}
+    </>
+  );
 
   return (
-    <main className="ding-screen">
-      <header className="ding-topbar">
-        <button type="button" onClick={onExit} aria-label="返回游戏大厅">←</button>
-        <div className="ding-title"><small>CARDFORGE · TABLE 004</small><strong>定鼎 · 身份局</strong></div>
-        <div className="ding-tools">
-          <button type="button" onClick={() => setShowProfile(true)} aria-label="查看定鼎战绩">▤</button>
-          <button type="button" onClick={() => setShowRules(true)} aria-label="查看规则">?</button>
-          <button type="button" onClick={() => setShowLog((value) => !value)} aria-label="查看牌局记录">≡</button>
-          <button type="button" onClick={cyclePlaybackSpeed} aria-label={`AI 速度 ${playbackSpeed}×`} title={`AI 速度 ${playbackSpeed}×`}>{playbackSpeed}×</button>
-          <button type="button" onClick={toggleSound} aria-label={soundEnabled ? "关闭声音" : "开启声音"}>{soundEnabled ? "♪" : "×"}</button>
-        </div>
-      </header>
+    <GameShell
+      className="ding-screen"
+      contentClassName="ding-content"
+      topBar={(
+        <GameTopBar
+          className="ding-topbar"
+          title="定鼎"
+          subtitle={`身份局 · 第 ${state.turnNumber} 回合`}
+          onBack={onExit}
+          backLabel="返回游戏大厅"
+          actions={toolActions.slice(0, 1)}
+          onMore={() => setShowTools(true)}
+          moreOpen={showTools}
+          moreLabel="更多选项"
+        />
+      )}
+      status={<span className={overlayOpen ? "ding-status is-paused" : "ding-status"}>{gameStatus}</span>}
+      statusAriaLive={pendingHumanResponse ? "off" : "polite"}
+      overlayActive={overlayOpen}
+      overlay={gameOverlay}
+    >
 
       {restoredNotice && <div className="ding-restore-notice" role="status">已恢复定鼎牌局</div>}
       {saveBlocked && (
@@ -686,8 +973,6 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
           <button type="button" onClick={resetUnreadableSave}>重置旧存档并启用保存</button>
         </div>
       )}
-
-      {heroDraft && <DingHeroDraft options={heroDraft.options} onChoose={selectDraftHero} onExit={onExit} />}
 
       <section className="ding-table" aria-label="四席定鼎牌桌">
         <div className="ding-board">
@@ -698,8 +983,9 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
                 key={player.id}
                 player={player}
                 active={state.activePlayerId === player.id && state.status === "playing"}
-                targetable={targetOptions.includes(player.id)}
-                selectionActive={Boolean(selectedCardUid)}
+                targetable={seatTargetOptions.includes(player.id)}
+                selected={Boolean(selectedTarget && selectedTarget.id === player.id)}
+                selectionActive={Boolean(selectedCard) && humanCanPlay && !selectedCardUsesImplicitTarget}
                 delayedCards={state.delayedTricks[player.id].map((entry) => entry.card)}
                 onTarget={selectTarget}
                 onInspect={() => setNotice(`${player.displayName} · ${player.revealed ? IDENTITY_NAMES[player.identity] : "身份隐藏"} · 体力 ${player.hp}/${player.maxHp} · 距离你 ${distanceBetween(state.players, human.id, player.id)}`)}
@@ -707,7 +993,7 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
             );
           })}
 
-          <div className="ding-center" aria-live="polite">
+          <div className="ding-center">
             <span className="ding-center__phase">{phaseLabel(state.phase)} · 第 {state.turnNumber} 回合</span>
             <strong>{active.displayName}{state.status === "playing" ? "行动中" : ""}</strong>
             <div className="ding-piles">
@@ -729,11 +1015,43 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
         </div>
       </section>
 
+      <ActionDock
+        className={`ding-decision-dock ${pendingHumanResponse ? "is-response" : "is-hand"}`}
+        label={pendingHumanResponse ? "需要你响应" : "你的手牌与操作"}
+      >
       {pendingHumanResponse ? (
-        <section className="ding-response" aria-label="响应区">
+        <div
+          ref={responseRef}
+          className="ding-response"
+          aria-live="assertive"
+          aria-atomic="true"
+          tabIndex={-1}
+        >
           {humanRespondingSkill && pendingSkill ? (
-            <>
-              <div>
+            <DingResponsePanel actions={(
+              <>
+                <button
+                  type="button"
+                  disabled={!pendingSkillConfirmReady}
+                  onClick={() => {
+                    if (!pendingSkillConfirmReady) return;
+                    const cardUid = pendingSkillNeedsCost ? skillCostUid : undefined;
+                    const targetId = pendingSkillNeedsTarget ? skillTargetId : undefined;
+                    transition((current) => respondToSkill(current, human.id, { cardUid, targetId }));
+                    setSkillCostUid(undefined);
+                    setSkillTargetId(undefined);
+                    playSound(pendingSkillDefinition?.effect.kind === "draw" || pendingSkillDefinition?.effect.kind === "draw-discard" ? "card" : "heal");
+                  }}
+                >确认发动</button>
+                <button type="button" onClick={() => {
+                  transition((current) => respondToSkill(current, human.id));
+                  setSkillCostUid(undefined);
+                  setSkillTargetId(undefined);
+                  playSound("tap");
+                }}>放弃发动</button>
+              </>
+            )}>
+              <div data-response-focus tabIndex={-1}>
                 <small>武将主动技</small>
                 <strong>{pendingSkillDefinition?.name ?? "主动技"}</strong>
                 <p>{pendingSkill.prompt}</p>
@@ -792,37 +1110,11 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
                   </div>
                 </div>
               )}
-              <div className="ding-response__actions">
-                <button
-                  type="button"
-                  disabled={!pendingSkillConfirmReady}
-                  onClick={() => {
-                    if (!pendingSkillConfirmReady) return;
-                    const cardUid = pendingSkillNeedsCost ? skillCostUid : undefined;
-                    const targetId = pendingSkillNeedsTarget ? skillTargetId : undefined;
-                    transition((current) => respondToSkill(current, human.id, { cardUid, targetId }));
-                    setSkillCostUid(undefined);
-                    setSkillTargetId(undefined);
-                    playSound(pendingSkillDefinition?.effect.kind === "draw" || pendingSkillDefinition?.effect.kind === "draw-discard" ? "card" : "heal");
-                  }}
-                >确认发动</button>
-                <button type="button" onClick={() => {
-                  transition((current) => respondToSkill(current, human.id));
-                  setSkillCostUid(undefined);
-                  setSkillTargetId(undefined);
-                  playSound("tap");
-                }}>放弃发动</button>
-              </div>
-            </>
+            </DingResponsePanel>
           ) : null}
           {humanRespondingStrike && pendingStrike ? (
-            <>
-              <div>
-                <small>需要响应 · 刺击</small>
-                <strong>{state.players.find((player) => player.id === pendingStrike.actorId)?.displayName}的「刺击」正指向你</strong>
-                <p>{pendingStrike.unavoidable ? "此击无法被「闪避」响应，只能承受。" : "打出「闪避」抵消伤害，或选择承受。"}</p>
-              </div>
-              <div className="ding-response__actions">
+            <DingResponsePanel actions={(
+              <>
                 {!pendingStrike.unavoidable && human.hand.filter((card) => card.type === "evade").map((card) => (
                   <button key={card.id} type="button" onClick={() => {
                     transition((current) => respondToStrike(current, human.id, card.id));
@@ -833,12 +1125,35 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
                   transition((current) => respondToStrike(current, human.id));
                   playSound("hit");
                 }}>承受攻击</button>
+              </>
+            )}>
+              <div data-response-focus tabIndex={-1}>
+                <small>需要响应 · 刺击</small>
+                <strong>{state.players.find((player) => player.id === pendingStrike.actorId)?.displayName}的「刺击」正指向你</strong>
+                <p>{pendingStrike.unavoidable ? "此击无法被「闪避」响应，只能承受。" : "打出「闪避」抵消伤害，或选择承受。"}</p>
               </div>
-            </>
+            </DingResponsePanel>
           ) : null}
           {humanRespondingProtect && pendingProtect ? (
-            <>
-              <div>
+            <DingResponsePanel actions={(
+              <>
+                <button
+                  type="button"
+                  disabled={!protectCardUid}
+                  onClick={() => {
+                    transition((current) => respondToProtect(current, human.id, protectCardUid));
+                    setProtectCardUid(undefined);
+                    playSound("card");
+                  }}
+                >弃置护主</button>
+                <button type="button" onClick={() => {
+                  transition((current) => respondToProtect(current, human.id));
+                  setProtectCardUid(undefined);
+                  playSound("tap");
+                }}>不护主</button>
+              </>
+            )}>
+              <div data-response-focus tabIndex={-1}>
                 <small>辅臣护主</small>
                 <strong>主君受到刺击</strong>
                 <p>你可以弃置任意 1 张手牌，为主君抵挡 1 点伤害；弃置会公开你的辅臣身份。</p>
@@ -867,32 +1182,26 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
                   </div>
                 </div>
               </div>
-              <div className="ding-response__actions">
-                <button
-                  type="button"
-                  disabled={!protectCardUid}
-                  onClick={() => {
-                    transition((current) => respondToProtect(current, human.id, protectCardUid));
-                    setProtectCardUid(undefined);
-                    playSound("card");
-                  }}
-                >弃置护主</button>
-                <button type="button" onClick={() => {
-                  transition((current) => respondToProtect(current, human.id));
-                  setProtectCardUid(undefined);
-                  playSound("tap");
-                }}>不护主</button>
-              </div>
-            </>
+            </DingResponsePanel>
           ) : null}
           {humanRespondingProbe && pendingProbe ? (
-            <>
-              <div>
+            <DingResponsePanel actions={(
+              <button
+                type="button"
+                disabled={!probeGuess}
+                onClick={() => {
+                  transition((current) => respondToProbe(current, human.id, probeGuess));
+                  setProbeGuess(undefined);
+                  playSound("card");
+                }}
+              >确认猜测</button>
+            )}>
+              <div data-response-focus tabIndex={-1}>
                 <small>刺探身份</small>
                 <strong>猜测{state.players.find((player) => player.id === pendingProbe.targetId)?.displayName}的身份</strong>
                 <p>猜对会公开其身份并摸两张牌；猜错你会随机弃置一张手牌。</p>
               </div>
-              <div className="ding-response__actions">
+              <div className="ding-response__choices" role="group" aria-label="选择猜测身份">
                 {(["loyalist", "rebel", "renegade"] as const).map((identity) => (
                   <button
                     key={identity}
@@ -906,27 +1215,11 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
                   >{IDENTITY_NAMES[identity]}</button>
                 ))}
               </div>
-              <div className="ding-response__actions">
-                <button
-                  type="button"
-                  disabled={!probeGuess}
-                  onClick={() => {
-                    transition((current) => respondToProbe(current, human.id, probeGuess));
-                    setProbeGuess(undefined);
-                    playSound("card");
-                  }}
-                >确认猜测</button>
-              </div>
-            </>
+            </DingResponsePanel>
           ) : null}
           {humanRespondingDying && pendingDying ? (
-            <>
-              <div>
-                <small>濒死求援</small>
-                <strong>{state.players.find((player) => player.id === pendingDying.targetId)?.displayName}需要 {pendingDying.required - pendingDying.offered} 张「疗元」</strong>
-                <p>你可以打出一张「疗元」，或选择放弃。</p>
-              </div>
-              <div className="ding-response__actions">
+            <DingResponsePanel actions={(
+              <>
                 {human.hand.filter((card) => card.type === "salve").map((card) => (
                   <button key={card.id} type="button" onClick={() => {
                     transition((current) => respondToDying(current, human.id, card.id));
@@ -937,21 +1230,18 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
                   transition((current) => respondToDying(current, human.id));
                   playSound("tap");
                 }}>放弃救援</button>
+              </>
+            )}>
+              <div data-response-focus tabIndex={-1}>
+                <small>濒死求援</small>
+                <strong>{state.players.find((player) => player.id === pendingDying.targetId)?.displayName}需要 {pendingDying.required - pendingDying.offered} 张「疗元」</strong>
+                <p>你可以打出一张「疗元」，或选择放弃。</p>
               </div>
-            </>
+            </DingResponsePanel>
           ) : null}
           {humanRespondingTrick && pendingTrick ? (
-            <>
-              <div>
-                <small>无懈可击响应</small>
-                <strong>
-                  {pendingTrick.cardType === "nullify"
-                    ? `${state.players.find((player) => player.id === pendingTrick.actorId)?.displayName}的「无懈可击」正指向「${counterTargetName}」`
-                    : `${state.players.find((player) => player.id === pendingTrick.actorId)?.displayName}的「${trickCardName(pendingTrick)}」等待响应`}
-                </strong>
-                <p>打出「无懈可击」抵消这张锦囊，或选择不响应。</p>
-              </div>
-              <div className="ding-response__actions">
+            <DingResponsePanel actions={(
+              <>
                 {human.hand.filter((card) => card.type === "nullify").map((card) => (
                   <button key={card.id} type="button" onClick={() => {
                     transition((current) => respondToTrick(current, human.id, card.id));
@@ -962,17 +1252,22 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
                   transition((current) => respondToTrick(current, human.id));
                   playSound("tap");
                 }}>不响应</button>
+              </>
+            )}>
+              <div data-response-focus tabIndex={-1}>
+                <small>无懈可击响应</small>
+                <strong>
+                  {pendingTrick.cardType === "nullify"
+                    ? `${state.players.find((player) => player.id === pendingTrick.actorId)?.displayName}的「无懈可击」正指向「${counterTargetName}」`
+                    : `${state.players.find((player) => player.id === pendingTrick.actorId)?.displayName}的「${trickCardName(pendingTrick)}」等待响应`}
+                </strong>
+                <p>打出「无懈可击」抵消这张锦囊，或选择不响应。</p>
               </div>
-            </>
+            </DingResponsePanel>
           ) : null}
           {humanRespondingDuel && pendingDuel ? (
-            <>
-              <div>
-                <small>约斗响应</small>
-                <strong>约斗轮到你出「刺击」</strong>
-                <p>双方轮流打出「刺击」，先打不出的一方受到对方造成的 1 点伤害。</p>
-              </div>
-              <div className="ding-response__actions">
+            <DingResponsePanel actions={(
+              <>
                 {human.hand.filter((card) => card.type === "strike").map((card) => (
                   <button key={card.id} type="button" onClick={() => {
                     transition((current) => respondToDuel(current, human.id, card.id));
@@ -983,17 +1278,18 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
                   transition((current) => respondToDuel(current, human.id));
                   playSound("hit");
                 }}>打不出</button>
+              </>
+            )}>
+              <div data-response-focus tabIndex={-1}>
+                <small>约斗响应</small>
+                <strong>约斗轮到你出「刺击」</strong>
+                <p>双方轮流打出「刺击」，先打不出的一方受到对方造成的 1 点伤害。</p>
               </div>
-            </>
+            </DingResponsePanel>
           ) : null}
           {humanRespondingHorde && pendingHorde ? (
-            <>
-              <div>
-                <small>合围响应</small>
-                <strong>合围压境</strong>
-                <p>打出「刺击」抵御，否则受到 {state.players.find((player) => player.id === pendingHorde.actorId)?.displayName} 造成的 1 点伤害。</p>
-              </div>
-              <div className="ding-response__actions">
+            <DingResponsePanel actions={(
+              <>
                 {human.hand.filter((card) => card.type === "strike").map((card) => (
                   <button key={card.id} type="button" onClick={() => {
                     transition((current) => respondToHorde(current, human.id, card.id));
@@ -1004,17 +1300,18 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
                   transition((current) => respondToHorde(current, human.id));
                   playSound("hit");
                 }}>不打出</button>
+              </>
+            )}>
+              <div data-response-focus tabIndex={-1}>
+                <small>合围响应</small>
+                <strong>合围压境</strong>
+                <p>打出「刺击」抵御，否则受到 {state.players.find((player) => player.id === pendingHorde.actorId)?.displayName} 造成的 1 点伤害。</p>
               </div>
-            </>
+            </DingResponsePanel>
           ) : null}
           {humanRespondingVolley && pendingVolley ? (
-            <>
-              <div>
-                <small>齐射响应</small>
-                <strong>齐射袭来</strong>
-                <p>打出「闪避」躲避，否则受到 {state.players.find((player) => player.id === pendingVolley.actorId)?.displayName} 造成的 1 点伤害。</p>
-              </div>
-              <div className="ding-response__actions">
+            <DingResponsePanel actions={(
+              <>
                 {human.hand.filter((card) => card.type === "evade").map((card) => (
                   <button key={card.id} type="button" onClick={() => {
                     transition((current) => respondToVolley(current, human.id, card.id));
@@ -1025,12 +1322,18 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
                   transition((current) => respondToVolley(current, human.id));
                   playSound("hit");
                 }}>不打出</button>
+              </>
+            )}>
+              <div data-response-focus tabIndex={-1}>
+                <small>齐射响应</small>
+                <strong>齐射袭来</strong>
+                <p>打出「闪避」躲避，否则受到 {state.players.find((player) => player.id === pendingVolley.actorId)?.displayName} 造成的 1 点伤害。</p>
               </div>
-            </>
+            </DingResponsePanel>
           ) : null}
-        </section>
+        </div>
       ) : (
-        <section className="ding-hand-dock" aria-label="你的手牌">
+        <div className="ding-hand-dock">
           <header>
             <span>
               <small>你的身份 · {IDENTITY_NAMES[human.identity]}</small>
@@ -1041,13 +1344,15 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
                 </em>
               )}
             </span>
-            <span className="ding-action-copy">
+            <span id="ding-action-guidance" className="ding-action-copy" aria-live="polite">
               {humanDiscarding
                 ? `弃牌阶段：请选 ${required} 张弃置（${discardSelection.length}/${required}）`
                 : humanCanPlay && selectedCard
-                  ? targetOptions.length > 1
+                  ? selectedCardUsesImplicitTarget
+                    ? `已选择「${selectedCard.name}」，可以直接使用`
+                    : targetOptions.length > 1 && !selectedTarget
                     ? `请选择「${selectedCard.name}」的目标`
-                    : `点击出牌使用「${selectedCard.name}」`
+                    : `已选择${selectedTarget?.displayName ?? "目标"}，可以使用「${selectedCard.name}」`
                   : humanCanPlay
                     ? "选择一张可出的牌，或发动武将技能"
                     : state.phase === "play" && active.id === human.id
@@ -1061,15 +1366,17 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
             {human.hand.map((card) => {
               const playable = playableCards.some((entry) => entry.id === card.id);
               const selected = selectedCardUid === card.id || discardSelection.includes(card.id);
+              const interactive = humanDiscarding || (humanCanPlay && playable);
               return (
                 <button
                   key={card.id}
                   type="button"
-                  className={`ding-card ding-card--${card.type} ${selected ? "is-selected" : ""} ${humanCanPlay && !playable ? "is-unavailable" : ""}`}
+                  className={`ding-card ding-card--${card.type} ${selected ? "is-selected" : ""} ${!interactive ? "is-unavailable" : ""}`}
                   style={{ "--card-tone": card.tone } as CSSProperties}
                   onClick={() => selectCard(card.id)}
+                  disabled={!interactive}
                   aria-pressed={selected}
-                  aria-label={`${card.name}${humanDiscarding ? "，选择弃置" : playable ? "，可打出" : ""}`}
+                  aria-label={`${card.name}${humanDiscarding ? "，选择弃置" : playable ? "，可打出" : "，当前不可操作"}`}
                 >
                   <span className="ding-card__symbol" aria-hidden="true">{card.symbol}</span>
                   <strong>{card.name}</strong>
@@ -1078,7 +1385,7 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
               );
             })}
           </div>
-          <footer className="ding-actions">
+          <div className="ding-actions" role="group" aria-label="回合操作">
             {humanDiscarding ? (
               <button type="button" className="ding-action ding-action--primary" disabled={!discardReady} onClick={confirmDiscard}>确认弃牌</button>
             ) : (
@@ -1097,7 +1404,16 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
                     playSound("heal");
                   }}
                 >{activeSkillOffer ? `${activeSkillOffer.skill.name}` : "武将技能"}</button>
-                <button type="button" className="ding-action ding-action--primary" disabled={!humanCanPlay || !selectedCardUid} onClick={playSelection}>出牌 →</button>
+                <button
+                  type="button"
+                  className="ding-action ding-action--primary"
+                  disabled={!playSelectionReady}
+                  onClick={playSelection}
+                  aria-describedby="ding-action-guidance"
+                  aria-label={selectedCard && selectedTarget
+                    ? `使用「${selectedCard.name}」对${selectedTarget.displayName}出牌`
+                    : playActionLabel}
+                >{playActionLabel}</button>
                 <button type="button" className="ding-action" disabled={!(state.phase === "play" && active.id === human.id && state.stack.length === 0)} onClick={() => {
                   transition((current) => endTurn(current, human.id));
                   setSelectedCardUid(undefined);
@@ -1108,116 +1424,10 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
                 }}>结束回合</button>
               </>
             )}
-          </footer>
-        </section>
-      )}
-
-      {showLog && (
-        <aside className="ding-log" aria-label="牌局记录">
-          <header><strong>牌局记录</strong><button type="button" onClick={() => setShowLog(false)} aria-label="关闭牌局记录">×</button></header>
-          <ol>{[...state.log].reverse().map((entry) => <li key={entry.id}>{entry.text}</li>)}</ol>
-        </aside>
-      )}
-
-      {showProfile && (
-        <div ref={profileRef} className="ding-modal ding-modal--profile">
-          <DingProfilePanel profile={root.lifetimeProfile} onClose={() => setShowProfile(false)} />
+          </div>
         </div>
       )}
-
-      {showRules && (
-        <div ref={rulesRef} className="ding-modal" role="dialog" aria-modal="true" aria-labelledby="ding-rules-title" tabIndex={-1}>
-          <article className="ding-rules">
-            <button type="button" className="ding-rules__close" onClick={() => setShowRules(false)} aria-label="关闭规则">×</button>
-            <span className="ding-rules__ribbon">身份局</span>
-            <small>TABLE 004 · M5 身份体验</small>
-            <h2 id="ding-rules-title">四席暗局，<br />先明主君，再定鼎。</h2>
-            <p>主君身份公开并多 1 点体力；其余三人身份隐藏。主君与辅臣要清剿叛锋与流谋；叛锋要在主君倒下时达阵；流谋必须成为主君倒下时唯一的其他存活者。</p>
-            <div className="ding-rules__grid">
-              <span><b>回合</b>准备 → 判定 → 摸 2 张 → 出牌 → 弃牌到手牌上限（等于当前体力）</span>
-              <span><b>刺击</b>攻击范围内每回合一次；目标可出「闪避」</span>
-              <span><b>疗元</b>受伤时自疗，或在任何人濒死时救援</span>
-              <span><b>锦囊</b>聚势/拆解/牵袭/约斗/合围/齐射/同袍/刺探先询问「无懈可击」，再进结算栈；拆解与牵袭可作用于手牌、装备或判定区</span>
-              <span><b>延时</b>断锋/困阵/焚营进入判定区，在判定阶段翻牌顶判定后结算</span>
-              <span><b>无懈</b>抵消一张锦囊；无懈本身可被另一张无懈反制，层层嵌套后自栈顶结算</span>
-              <span><b>约斗</b>目标先出「刺击」，双方轮流；先打不出的一方受对方 1 点伤害</span>
-              <span><b>合围/齐射</b>其他角色依次需出「刺击」/「闪避」，否则受 1 点伤害</span>
-              <span><b>武将</b>开局从三名武将中选一，AI 从其余武将补位；武将体力为 3 或 4，主君 +1，技能在回合、伤害、濒死或锦囊结算时触发</span>
-              <span><b>距离</b>相邻座位为 1；赤影 -1、磐影 +1、长锋射程 2、穿云射程 3；犀甲每回合首次受伤 -1</span>
-              <span><b>胜负</b>主君死时若只剩流谋则流谋胜，否则叛锋胜；叛锋与流谋全灭则主君方胜</span>
-              <span><b>奖惩</b>击退叛锋摸 3 张；流谋不取奖惩；主君误杀辅臣弃光手牌。主君倒下即终局</span>
-              <span><b>护主</b>主君被刺击且未闪避时，存活辅臣可自选是否弃 1 张手牌抵挡 1 点伤害；弃牌会公开辅臣身份</span>
-              <span><b>过载</b>第 24 轮起，每跨过一整轮对存活角色造成递增真实伤害，但不会致死</span>
-            </div>
-            <p className="ding-rules__scope">M5 已加入三选一选将、身份与武将战绩、结算栈复盘；辅臣护主、牌局过载及三档身份 AI 同时启用。</p>
-            <div className="ding-difficulty" role="radiogroup" aria-label="对手难度">
-              <small>对手 AI 难度 · 对当前及后续牌局生效</small>
-              <div>
-                {DIFFICULTY_OPTIONS.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={state.difficulty === option.id}
-                    className={state.difficulty === option.id ? "is-selected" : ""}
-                    onClick={() => {
-                      transition((current) => changeDifficulty(current, option.id));
-                      playSound("tap");
-                    }}
-                  >
-                    <strong>{DING_DIFFICULTY_NAMES[option.id]}</strong>
-                    <span>{option.description}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-            <button type="button" className="ding-rules__enter" onClick={() => { setShowRules(false); playSound("card"); }}>入席开局 <span>→</span></button>
-          </article>
-        </div>
-      )}
-
-      {state.status === "finished" && state.winner && (
-        <div ref={resultRef} className="ding-modal" role="dialog" aria-modal="true" aria-labelledby="ding-result-title" tabIndex={-1}>
-          <article className="ding-result">
-            <span className="ding-result__seal" aria-hidden="true">鼎</span>
-            <small>第 {state.turnNumber} 回合 · {DING_DIFFICULTY_NAMES[state.difficulty]}难度 · 身份局</small>
-            <h2 id="ding-result-title">{WINNER_COPY[state.winner].title}</h2>
-            <p>{WINNER_COPY[state.winner].detail}</p>
-            <div className="ding-result__identities">
-              {state.players.map((player) => {
-                const hero = HERO_CATALOG[player.heroId as HeroId];
-                return (
-                  <span key={player.id}>
-                    <b>{player.displayName}</b>
-                    <small>{IDENTITY_NAMES[player.identity]}{hero ? ` · ${hero.name}` : ""}</small>
-                    <em title={hero?.description}>{hero?.skillName ?? ""} · {player.alive ? `${player.hp}/${player.maxHp}` : "退场"}</em>
-                  </span>
-                );
-              })}
-            </div>
-            <div className="ding-result__review">
-              <header>
-                <strong>对局复盘</strong>
-                <div role="group" aria-label="复盘记录筛选">
-                  <button type="button" className={resultLogMode === "key" ? "is-selected" : ""} onClick={() => setResultLogMode("key")}>关键节点</button>
-                  <button type="button" className={resultLogMode === "full" ? "is-selected" : ""} onClick={() => setResultLogMode("full")}>完整记录</button>
-                </div>
-              </header>
-              <ol>
-                {[...state.log].reverse()
-                  .filter((entry) => resultLogMode === "full" || [
-                    "退场", "濒死", "无懈", "判定", "跳过", "发动", "胜负", "赢下", "达成",
-                  ].some((keyword) => entry.text.includes(keyword)))
-                  .map((entry) => <li key={entry.id}><small>#{entry.id}</small><span>{entry.text}</span></li>)}
-              </ol>
-            </div>
-            <div className="ding-result__actions">
-              <button type="button" onClick={restart}>再来一局</button>
-              <button type="button" onClick={onExit}>返回大厅</button>
-            </div>
-          </article>
-        </div>
-      )}
-    </main>
+      </ActionDock>
+    </GameShell>
   );
 }

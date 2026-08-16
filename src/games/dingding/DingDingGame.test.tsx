@@ -1,6 +1,6 @@
 /* @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GamePersistenceHandle } from "../../core/games/types";
 import { SoundProvider } from "../../shared/audio/SoundProvider";
@@ -82,6 +82,21 @@ function filteredSkillCostTable(): DingState {
       return player;
     }),
     deck: game.deck.filter((card) => card.id !== evade.id),
+  };
+}
+
+function cardTargetTable(type: "aid" | "duel" | "horde"): DingState {
+  const game = skillTable(false);
+  const card = game.deck.find((entry) => entry.type === type)!;
+  const originalHand = game.players.find((player) => player.id === "south")!.hand;
+  return {
+    ...game,
+    players: game.players.map((player) => {
+      if (player.id === "south") return { ...player, hand: [card], ...(type === "aid" ? { hp: player.maxHp } : {}) };
+      if (type === "aid") return { ...player, hp: player.id === "north" ? player.maxHp - 1 : player.maxHp };
+      return player;
+    }),
+    deck: [...game.deck.filter((entry) => entry.id !== card.id), ...originalHand],
   };
 }
 
@@ -225,6 +240,7 @@ function renderWithState(state: DingState) {
 }
 
 function renderWithRoot(root: DingRootState, save = vi.fn<GamePersistenceHandle["save"]>()) {
+  const onExit = vi.fn();
   const persistence: GamePersistenceHandle = {
     restored: { schemaVersion: DING_SAVE_SCHEMA_VERSION, data: root },
     save,
@@ -232,16 +248,90 @@ function renderWithRoot(root: DingRootState, save = vi.fn<GamePersistenceHandle[
   };
   const view = render(
     <SoundProvider>
-      <DingDingGame onExit={vi.fn()} persistence={persistence} />
+      <DingDingGame onExit={onExit} persistence={persistence} />
     </SoundProvider>,
   );
-  return { ...view, save };
+  return { ...view, save, onExit };
 }
 
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
   vi.restoreAllMocks();
+});
+
+describe("DingDingGame card target selection", () => {
+  it("automatically selects the only legal target and enables the named play action", () => {
+    renderWithState(cardTargetTable("aid"));
+
+    fireEvent.click(screen.getByRole("button", { name: "援护，可打出" }));
+
+    const table = within(screen.getByRole("region", { name: "四席定鼎牌桌" }));
+    const selectedSeat = table.getByRole("button", { name: /^北座，.*已选为当前目标/ });
+    const playAction = screen.getByRole("button", { name: "使用「援护」对北座出牌" }) as HTMLButtonElement;
+    expect(selectedSeat.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByText("已选择北座，可以使用「援护」")).toBeTruthy();
+    expect(playAction.disabled).toBe(false);
+  });
+
+  it("presents a global card as target-free instead of highlighting the player", () => {
+    renderWithState(cardTargetTable("horde"));
+
+    fireEvent.click(screen.getByRole("button", { name: "合围，可打出" }));
+
+    const table = within(screen.getByRole("region", { name: "四席定鼎牌桌" }));
+    expect(table.queryAllByRole("button").filter((button) => button.hasAttribute("aria-pressed"))).toEqual([]);
+    expect(screen.getByText("已选择「合围」，可以直接使用")).toBeTruthy();
+    const playAction = screen.getByRole("button", { name: "使用「合围」" }) as HTMLButtonElement;
+    expect(playAction.disabled).toBe(false);
+
+    fireEvent.click(playAction);
+
+    expect(screen.getByLabelText("结算栈，共 1 层").textContent).toContain("合围");
+    expect(screen.getByRole("region", { name: "需要你响应" })).toBeTruthy();
+  });
+
+  it("requires one target for a multi-target card and exposes only that seat as pressed", () => {
+    renderWithState(cardTargetTable("duel"));
+
+    fireEvent.click(screen.getByRole("button", { name: "约斗，可打出" }));
+
+    const guidance = screen.getByText("请选择「约斗」的目标");
+    const pendingAction = screen.getByRole("button", { name: "请先选择目标" }) as HTMLButtonElement;
+    expect(guidance).toBeTruthy();
+    expect(pendingAction.disabled).toBe(true);
+
+    const table = within(screen.getByRole("region", { name: "四席定鼎牌桌" }));
+    const eastSeat = table.getByRole("button", { name: /^东座，.*可选为目标/ });
+    const westSeat = table.getByRole("button", { name: /^西座，.*可选为目标/ });
+    expect(eastSeat.getAttribute("aria-pressed")).toBe("false");
+    expect(westSeat.getAttribute("aria-pressed")).toBe("false");
+
+    fireEvent.click(eastSeat);
+
+    const playAction = screen.getByRole("button", { name: "使用「约斗」对东座出牌" }) as HTMLButtonElement;
+    expect(eastSeat.getAttribute("aria-pressed")).toBe("true");
+    expect(westSeat.getAttribute("aria-pressed")).toBe("false");
+    expect(table.getAllByRole("button").filter((button) => button.getAttribute("aria-pressed") === "true")).toEqual([eastSeat]);
+    expect(playAction.disabled).toBe(false);
+  });
+
+  it("combines the current-turn and selected-target badges when they share a seat", () => {
+    const game = cardTargetTable("aid");
+    renderWithState({
+      ...game,
+      players: game.players.map((player) => player.id === "south"
+        ? { ...player, hp: player.maxHp - 1 }
+        : { ...player, hp: player.maxHp }),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "援护，可打出" }));
+
+    const humanSeat = screen.getByRole("button", { name: /^你，.*已选为当前目标/ });
+    const badges = humanSeat.querySelectorAll(".ding-seat__turn, .ding-seat__target");
+    expect(badges).toHaveLength(1);
+    expect(badges[0]?.textContent).toBe("行动 · 已选");
+  });
 });
 
 describe("DingDingGame active skill flow", () => {
@@ -304,9 +394,11 @@ describe("DingDingGame active skill flow", () => {
 
   it("shows the hero draft and starts the match after choosing a hero", () => {
     const root = startDingMatchWithHeroDraft(createDefaultDingRootState(), "standard", () => 0.37);
-    const { save } = renderWithRoot(root);
+    const { container, save, onExit } = renderWithRoot(root);
 
     expect(screen.getByText("三选一 · 选择武将")).toBeTruthy();
+    fireEvent.mouseDown(container.querySelector(".cf-dialog-backdrop")!);
+    expect(onExit).not.toHaveBeenCalled();
     const heroButtons = screen.getAllByRole("button", { name: /^选择武将/ });
     expect(heroButtons).toHaveLength(3);
     fireEvent.click(heroButtons[1]);
