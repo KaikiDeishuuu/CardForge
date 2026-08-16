@@ -53,13 +53,12 @@ interface GameLoadingProps {
 export function GameLoading({ gameName, retrying = false }: GameLoadingProps) {
   return (
     <main className="game-loading" role="status" aria-live="polite" aria-busy="true">
-      <span className="forge-spinner" aria-hidden="true"><i /><i /><i /></span>
+      <span className="forge-spinner" aria-hidden="true">牌</span>
       <span className="game-loading__copy">
         <small>{retrying ? "正在重新接驳" : "正在展开牌桌"}</small>
         <strong>{gameName}</strong>
         <p>正在准备规则、牌面与交互。</p>
       </span>
-      <span className="game-loading__rail" aria-hidden="true"><i /><b>CF · GAME HOST</b><i /></span>
     </main>
   );
 }

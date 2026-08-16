@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useModalFocus } from "../../../shared/ui/useModalFocus";
+import { Dialog } from "../../../shared/ui/GameShell";
 import { DIFFICULTY_NAMES, TEAM_NAMES } from "../domain/data";
 import { getCard } from "../domain/engine";
 import type { LifetimePlayerMetrics } from "../domain/session";
@@ -90,21 +90,27 @@ interface EndTurnConfirmProps {
 }
 
 export function EndTurnConfirm({ actionsRemaining, playableCards, onConfirm, onCancel }: EndTurnConfirmProps) {
-  const modalRef = useModalFocus({ active: true, initialFocus: ".primary-button", onDismiss: onCancel });
-
   return (
-    <div ref={modalRef} className="ledger-overlay ledger-overlay--confirm" role="alertdialog" aria-modal="true" aria-labelledby="end-turn-title" tabIndex={-1}>
-      <section className="end-turn-confirm">
-        <span className="end-turn-confirm__mark" aria-hidden="true">守</span>
-        <small>提前结束回合</small>
-        <h2 id="end-turn-title">行动力还没用完</h2>
-        <p>你还有 {actionsRemaining} 点行动力与 {playableCards} 张可出的牌；确认放弃这些行动吗？</p>
-        <div>
+    <Dialog
+      open
+      role="alertdialog"
+      title="行动力还没用完"
+      className="pact-dialog pact-dialog--confirm end-turn-confirm"
+      backdropClassName="pact-dialog-backdrop pact-dialog-backdrop--confirm"
+      initialFocus=".primary-button"
+      onClose={onCancel}
+      closeLabel="关闭结束回合确认"
+      footer={(
+        <>
           <button type="button" className="primary-button" onClick={onConfirm}>确认结束回合</button>
           <button type="button" className="secondary-button" onClick={onCancel}>继续行动</button>
-        </div>
-      </section>
-    </div>
+        </>
+      )}
+    >
+      <span className="end-turn-confirm__mark" aria-hidden="true">守</span>
+      <small>提前结束回合</small>
+      <p>你还有 {actionsRemaining} 点行动力与 {playableCards} 张可出的牌；确认放弃这些行动吗？</p>
+    </Dialog>
   );
 }
 
@@ -134,14 +140,20 @@ export function ResultPanel({
   const won = winner === playerTeam;
   const drawn = winner === "draw";
   const title = drawn ? "火种相抵，本局战平" : won ? "联手守住了这一焰" : "这一局由对手拿下";
-  const modalRef = useModalFocus({ active: true, initialFocus: ".primary-button" });
 
   return (
-    <div ref={modalRef} className="result-overlay" role="dialog" aria-modal="true" aria-labelledby="result-title" tabIndex={-1}>
+    <Dialog
+      open
+      title={title}
+      className="pact-dialog pact-dialog--result"
+      backdropClassName="pact-dialog-backdrop pact-dialog-backdrop--result"
+      dismissOnBackdrop={false}
+      initialFocus=".primary-button"
+    >
       <section className={`result-card ${drawn ? "result-card--draw" : `result-card--${winner}`}`}>
         <span className="result-card__seal" aria-hidden="true">{drawn ? "和" : won ? "胜" : "惜"}</span>
         <small>{DIFFICULTY_NAMES[difficulty]} · 第 {roundNumber} 轮</small>
-        <h2 id="result-title">{title}</h2>
+        <h2 aria-hidden="true">{title}</h2>
         <p>{drawn
           ? "双方同时耗尽火种。调整行动顺序，再试一次。"
           : `${TEAM_NAMES[winner as TeamId]}赢得争焰。${won
@@ -163,7 +175,7 @@ export function ResultPanel({
           <button type="button" className="text-button" onClick={onExit}>返回大厅</button>
         </div>
       </section>
-    </div>
+    </Dialog>
   );
 }
 
@@ -197,18 +209,26 @@ interface ProfilePanelProps {
 }
 
 export function ProfilePanel({ profile, canResetProfile, onResetProfile, onClose }: ProfilePanelProps) {
-  const modalRef = useModalFocus({ active: true, initialFocus: "button", onDismiss: onClose });
   const [confirmReset, setConfirmReset] = useState(false);
   const winRate = profile.completed === 0 ? "—" : `${Math.round((profile.wins / profile.completed) * 100)}%`;
 
   return (
-    <div ref={modalRef} className="ledger-overlay ledger-overlay--profile" role="dialog" aria-modal="true" aria-labelledby="profile-title" tabIndex={-1} onClick={onClose}>
-      <section className="forge-ledger profile-sheet" onClick={(event) => event.stopPropagation()}>
-        <header className="forge-ledger__header">
+    <Dialog
+      open
+      title={(
+        <span className="pact-dialog-title">
           <span className="ledger-seal" aria-hidden="true">录</span>
-          <span><small>只保存在本机</small><h2 id="profile-title">争焰记录</h2></span>
-          <button type="button" onClick={onClose} aria-label="关闭争焰记录">×</button>
-        </header>
+          <span><small aria-hidden="true">只保存在本机</small><span>争焰记录</span></span>
+        </span>
+      )}
+      className="pact-dialog pact-dialog--profile forge-ledger"
+      backdropClassName="pact-dialog-backdrop pact-dialog-backdrop--profile"
+      initialFocus=".cf-dialog__close"
+      restoreFocus=".cf-game-topbar__more"
+      onClose={onClose}
+      closeLabel="关闭争焰记录"
+    >
+      <section className="profile-sheet">
 
         <div className="profile-summary">
           <span><small>完成对局</small><b>{profile.completed}</b></span>
@@ -251,6 +271,6 @@ export function ProfilePanel({ profile, canResetProfile, onResetProfile, onClose
           )}
         </div>
       </section>
-    </div>
+    </Dialog>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState } from "react";
 import type { GameRegistration } from "../core/games/types";
 import { loadGameSave, type StoredGameSave } from "../shared/storage/GameSaveStore";
 
@@ -70,7 +70,7 @@ export function Lobby({ games, soundEnabled, onToggleSound, onLaunch }: LobbyPro
     <main className="lobby">
       <header className="lobby-header">
         <a href="#top" className="wordmark" aria-label="CardForge 首页">
-          <span className="wordmark__mark" aria-hidden="true"><i /><i /><i /></span>
+          <span className="wordmark__mark" aria-hidden="true">牌</span>
           <span><strong>CardForge</strong><small>卡牌工坊</small></span>
         </a>
         <div className="lobby-header__meta">
@@ -104,7 +104,6 @@ export function Lobby({ games, soundEnabled, onToggleSound, onLaunch }: LobbyPro
               <i>{featuredCode}</i>
             </span>
             <span className="featured-game__sigil" aria-hidden="true">
-              <i /><i /><i />
               <b>{featured.manifest.mark ?? "CF"}</b>
             </span>
             <span className="featured-game__copy">
@@ -135,7 +134,6 @@ export function Lobby({ games, soundEnabled, onToggleSound, onLaunch }: LobbyPro
                 type="button"
                 className="continue-game"
                 key={game.manifest.id}
-                style={{ "--game-accent": game.manifest.accent } as CSSProperties}
                 onClick={() => onLaunch(game.manifest.id)}
                 aria-label={`继续${game.manifest.name}，上次更新${formatSavedAgo(summary.savedAt)}`}
               >
@@ -168,13 +166,12 @@ export function Lobby({ games, soundEnabled, onToggleSound, onLaunch }: LobbyPro
               type="button"
               className={`planned-game ${isPlayable ? "is-playable" : ""}`}
               key={game.manifest.id}
-              style={{ "--game-accent": game.manifest.accent } as CSSProperties}
               onClick={() => isPlayable && onLaunch(game.manifest.id)}
               disabled={!isPlayable}
             >
               <span className="planned-game__status">{isPlayable ? "现可游玩" : "筹备中"}</span>
               <span className="planned-game__glyph" aria-hidden="true">
-                {isPlayable ? <b>{game.manifest.mark ?? "CF"}</b> : <><i /><i /></>}
+                <b>{isPlayable ? (game.manifest.mark ?? "CF") : "筹"}</b>
               </span>
               <small>{game.manifest.genre}</small>
               <h3>{game.manifest.name}</h3>
@@ -190,7 +187,7 @@ export function Lobby({ games, soundEnabled, onToggleSound, onLaunch }: LobbyPro
 
       <footer className="lobby-footer">
         <span className="wordmark wordmark--small">
-          <span className="wordmark__mark" aria-hidden="true"><i /><i /><i /></span>
+          <span className="wordmark__mark" aria-hidden="true">牌</span>
           <span><strong>CardForge</strong><small>规则各自独立，体验彼此相通</small></span>
         </span>
         <p>第三次架构验证 · 本地单机 · 无账号 · 无商城</p>

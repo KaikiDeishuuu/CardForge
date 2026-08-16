@@ -2,6 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import type { GameRuntimeProps } from "../../core/games/types";
 import { useSound } from "../../shared/audio/SoundProvider";
 import { playbackDelay, usePlaybackSpeed } from "../../shared/settings/usePlaybackSpeed";
+import {
+  GameShell,
+  GameTopBar,
+  ToolMenu,
+  type GameToolAction,
+} from "../../shared/ui/GameShell";
 import { PlayerHand } from "./components/PlayerHand";
 import { PlayerSeat } from "./components/PlayerSeat";
 import { CombatantSheet, TacticalBrief } from "./components/TacticalBrief";
@@ -69,6 +75,7 @@ export function EmberPactGame({ onExit, persistence }: GameRuntimeProps) {
     ?? createInitialState(Math.random, initialHumanId, initialRoot.preferences.difficulty));
   const [selectedUid, setSelectedUid] = useState<string>();
   const [showLog, setShowLog] = useState(false);
+  const [showTools, setShowTools] = useState(false);
   const [showBrief, setShowBrief] = useState(!restoredMatch);
   const [showProfile, setShowProfile] = useState(false);
   const [inspectedId, setInspectedId] = useState<string>();
@@ -94,8 +101,8 @@ export function EmberPactGame({ onExit, persistence }: GameRuntimeProps) {
     && state.status === "playing"
     && state.phase === "response"
     && responder?.controller === "human";
-  const overlayOpen = showBrief || showLog || showProfile || Boolean(inspectedId) || endTurnConfirmOpen;
-  const modalOpen = showBrief || showProfile || Boolean(inspectedId) || endTurnConfirmOpen || state.status === "finished";
+  const overlayOpen = showTools || showBrief || showLog || showProfile || Boolean(inspectedId) || endTurnConfirmOpen;
+  const modalOpen = showTools || showBrief || showProfile || Boolean(inspectedId) || endTurnConfirmOpen || state.status === "finished";
   const aiThinking = setupComplete
     && state.status === "playing"
     && !overlayOpen
@@ -366,107 +373,74 @@ export function EmberPactGame({ onExit, persistence }: GameRuntimeProps) {
     })),
   }), [root]);
 
-  return (
-    <main className="battle-screen">
-      <header className="battle-topbar">
-        <button type="button" className="icon-button" onClick={onExit} aria-label="返回游戏大厅"><span aria-hidden="true">←</span></button>
-        <div className="battle-title"><small>四席阵营策略</small><strong>争焰</strong></div>
-        <div className="battle-actions">
-          <button type="button" className="icon-button" onClick={() => setShowProfile(true)} aria-label="查看争焰记录"><span aria-hidden="true">◎</span></button>
-          <button type="button" className="icon-button" onClick={() => setShowBrief(true)} aria-label="打开角色与规则"><span aria-hidden="true">?</span></button>
-          <button type="button" className="icon-button" onClick={() => setShowLog((value) => !value)} aria-label="查看战报" aria-expanded={showLog} aria-controls="battle-log"><span aria-hidden="true">≡</span></button>
-          <button type="button" className="icon-button" onClick={cyclePlaybackSpeed} aria-label={`AI 速度 ${playbackSpeed}×`} title={`AI 速度 ${playbackSpeed}×`}><span className="speed-label" aria-hidden="true">{playbackSpeed}×</span></button>
-          <button type="button" className="icon-button" onClick={toggleSound} aria-label={soundEnabled ? "关闭声音" : "开启声音"}><span aria-hidden="true">{soundEnabled ? "♪" : "×"}</span></button>
-        </div>
-      </header>
+  const toolActions: readonly GameToolAction[] = [
+    {
+      id: "profile",
+      label: "查看争焰记录",
+      icon: "◎",
+      onSelect: () => setShowProfile(true),
+    },
+    {
+      id: "brief",
+      label: "打开角色与规则",
+      icon: "?",
+      onSelect: () => setShowBrief(true),
+    },
+    {
+      id: "log",
+      label: "查看战报",
+      icon: "≡",
+      pressed: showLog,
+      onSelect: () => setShowLog((value) => !value),
+    },
+    {
+      id: "speed",
+      label: `AI 速度 ${playbackSpeed}×`,
+      icon: `${playbackSpeed}×`,
+      onSelect: cyclePlaybackSpeed,
+    },
+    {
+      id: "sound",
+      label: soundEnabled ? "关闭声音" : "开启声音",
+      icon: soundEnabled ? "♪" : "×",
+      onSelect: toggleSound,
+    },
+  ];
 
-      <section className="battlefield" aria-label="争焰战场">
-        <div className="team-label team-label--enemy"><span>{TEAM_NAMES[enemyTeam]}</span><i /></div>
-        <div className="seat-row seat-row--enemies">
-          {enemies.map((combatant) => (
-            <PlayerSeat
-              key={combatant.id}
-              combatant={combatant}
-              active={state.activePlayerId === combatant.id}
-              targetable={validTargetIds.includes(combatant.id)}
-              selectionActive={Boolean(selectedUid)}
-              lastAction={state.lastAction}
-              revision={state.revision}
-              onTarget={handleTarget}
-              onInspect={setInspectedId}
-              onInvalidTarget={handleInvalidTarget}
-            />
-          ))}
-        </div>
+  const actionDock = isHumanResponse && responder && attacker && pendingCard ? (
+    <ResponsePanel
+      attacker={attacker}
+      responder={responder}
+      attackName={pendingCard.name}
+      incomingDamage={predictedIncomingDamage(state)}
+      cards={responseCards}
+      onRespond={(cardUid) => handleResponse(cardUid)}
+      onDecline={() => handleResponse()}
+    />
+  ) : (
+    <div className="hand-dock">
+      <div className="hand-dock__header">
+        <span><small>{isHumanTurn ? `你的手牌 · ${state.actionsRemaining} 行动力` : "你的手牌"}</small><strong>{actionPrompt}</strong></span>
+        <button type="button" className="pass-button" onClick={handleEndTurn} disabled={!isHumanTurn}>结束回合</button>
+      </div>
+      <PlayerHand
+        cards={player.hand}
+        selectedUid={selectedUid}
+        enabled={isHumanTurn}
+        playableUids={playableUids}
+        onSelect={handleSelect}
+      />
+    </div>
+  );
 
-        <TurnTrack
-          combatants={state.combatants}
-          activePlayerId={state.activePlayerId}
-          actionsRemaining={state.actionsRemaining}
-          roundNumber={state.roundNumber}
-          phase={state.phase}
-          summary={trackSummary}
-        />
-
-        <div className="seat-row seat-row--allies">
-          {allies.map((combatant) => (
-            <PlayerSeat
-              key={combatant.id}
-              combatant={combatant}
-              active={state.activePlayerId === combatant.id}
-              targetable={validTargetIds.includes(combatant.id)}
-              selectionActive={Boolean(selectedUid)}
-              lastAction={state.lastAction}
-              revision={state.revision}
-              onTarget={handleTarget}
-              onInspect={setInspectedId}
-              onInvalidTarget={handleInvalidTarget}
-            />
-          ))}
-        </div>
-        <div className="team-label team-label--ally"><i /><span>{TEAM_NAMES[player.team]}</span></div>
-      </section>
-
-      {isHumanResponse && responder && attacker && pendingCard ? (
-        <ResponsePanel
-          attacker={attacker}
-          responder={responder}
-          attackName={pendingCard.name}
-          incomingDamage={predictedIncomingDamage(state)}
-          cards={responseCards}
-          onRespond={(cardUid) => handleResponse(cardUid)}
-          onDecline={() => handleResponse()}
-        />
-      ) : (
-        <section className="hand-dock" aria-label="行动区">
-          <div className="hand-dock__header">
-            <span><small>{isHumanTurn ? `你的手牌 · ${state.actionsRemaining} 行动力` : "你的手牌"}</small><strong>{actionPrompt}</strong></span>
-            <button type="button" className="pass-button" onClick={handleEndTurn} disabled={!isHumanTurn}>结束回合</button>
-          </div>
-          <PlayerHand
-            cards={player.hand}
-            selectedUid={selectedUid}
-            enabled={isHumanTurn}
-            playableUids={playableUids}
-            onSelect={handleSelect}
-          />
-        </section>
-      )}
-
-      {restoredNotice && <div className="pact-restore-notice" role="status">已恢复第 {state.roundNumber} 轮争焰</div>}
-      {saveWarning && !modalOpen && (
-        <div className="pact-save-warning" role="alert">
-          <span>{saveWarning}</span>
-          {saveBlocked && <button type="button" onClick={resetUnreadableSave}>重置旧存档并启用保存</button>}
-        </div>
-      )}
-
-      {showLog && (
-        <aside id="battle-log" className="battle-log" aria-label="战报">
-          <div><strong>战报</strong><button type="button" onClick={() => setShowLog(false)} aria-label="关闭战报">×</button></div>
-          <ol>{[...state.log].reverse().map((entry) => <li key={entry.id}>{entry.text}</li>)}</ol>
-        </aside>
-      )}
+  const gameOverlay = (
+    <>
+      <ToolMenu
+        open={showTools}
+        title="牌桌选项"
+        actions={toolActions}
+        onClose={() => setShowTools(false)}
+      />
 
       {endTurnConfirmOpen && (
         <EndTurnConfirm
@@ -516,6 +490,93 @@ export function EmberPactGame({ onExit, persistence }: GameRuntimeProps) {
           onExit={onExit}
         />
       )}
-    </main>
+    </>
+  );
+
+  return (
+    <GameShell
+      className="battle-screen"
+      contentClassName="battlefield"
+      contentLabel="争焰战场"
+      contentRole="region"
+      topBar={(
+        <GameTopBar
+          className="battle-topbar"
+          title="争焰"
+          subtitle="四席阵营策略"
+          onBack={onExit}
+          backLabel="返回游戏大厅"
+          actions={toolActions}
+          onMore={() => setShowTools(true)}
+          moreOpen={showTools}
+          moreLabel="更多选项"
+        />
+      )}
+      status={restoredNotice ? `已恢复第 ${state.roundNumber} 轮争焰` : undefined}
+      actionDock={actionDock}
+      actionDockClassName="pact-action-dock"
+      actionDockLabel="行动区"
+      overlayActive={modalOpen}
+      overlay={gameOverlay}
+    >
+      <div className="team-label team-label--enemy"><span>{TEAM_NAMES[enemyTeam]}</span><i /></div>
+      <div className="seat-row seat-row--enemies">
+        {enemies.map((combatant) => (
+          <PlayerSeat
+            key={combatant.id}
+            combatant={combatant}
+            active={state.activePlayerId === combatant.id}
+            targetable={validTargetIds.includes(combatant.id)}
+            selectionActive={Boolean(selectedUid)}
+            lastAction={state.lastAction}
+            revision={state.revision}
+            onTarget={handleTarget}
+            onInspect={setInspectedId}
+            onInvalidTarget={handleInvalidTarget}
+          />
+        ))}
+      </div>
+
+      <TurnTrack
+        combatants={state.combatants}
+        activePlayerId={state.activePlayerId}
+        actionsRemaining={state.actionsRemaining}
+        roundNumber={state.roundNumber}
+        phase={state.phase}
+        summary={trackSummary}
+      />
+
+      <div className="seat-row seat-row--allies">
+        {allies.map((combatant) => (
+          <PlayerSeat
+            key={combatant.id}
+            combatant={combatant}
+            active={state.activePlayerId === combatant.id}
+            targetable={validTargetIds.includes(combatant.id)}
+            selectionActive={Boolean(selectedUid)}
+            lastAction={state.lastAction}
+            revision={state.revision}
+            onTarget={handleTarget}
+            onInspect={setInspectedId}
+            onInvalidTarget={handleInvalidTarget}
+          />
+        ))}
+      </div>
+      <div className="team-label team-label--ally"><i /><span>{TEAM_NAMES[player.team]}</span></div>
+
+      {saveWarning && !modalOpen && (
+        <div className="pact-save-warning" role="alert">
+          <span>{saveWarning}</span>
+          {saveBlocked && <button type="button" onClick={resetUnreadableSave}>重置旧存档并启用保存</button>}
+        </div>
+      )}
+
+      {showLog && (
+        <aside id="battle-log" className="battle-log" aria-label="战报">
+          <div><strong>战报</strong><button type="button" onClick={() => setShowLog(false)} aria-label="关闭战报">×</button></div>
+          <ol>{[...state.log].reverse().map((entry) => <li key={entry.id}>{entry.text}</li>)}</ol>
+        </aside>
+      )}
+    </GameShell>
   );
 }

@@ -111,6 +111,7 @@ interface SetupLedgerProps {
   /** 存档无法安全读取时显示，并允许玩家显式清除旧档后重新启用保存。 */
   saveWarning?: string;
   onResetSave?: () => void;
+  showCloseButton?: boolean;
 }
 
 export function SetupLedger({
@@ -123,6 +124,7 @@ export function SetupLedger({
   onResetArchive,
   saveWarning,
   onResetSave,
+  showCloseButton = true,
 }: SetupLedgerProps) {
   const [choice, setChoice] = useState<SetupChoice>("classic");
   const [rules, setRules] = useState(root.preferences.rules);
@@ -136,7 +138,7 @@ export function SetupLedger({
 
   return (
     <article className="rule-ledger setup-ledger">
-      <button type="button" className="rule-ledger__close" onClick={onExit} aria-label="返回游戏大厅">×</button>
+      {showCloseButton && <button type="button" className="rule-ledger__close" onClick={onExit} aria-label="返回游戏大厅">×</button>}
       <button type="button" className="rule-ledger__sound" onClick={onToggleSound} aria-label={soundEnabled ? "关闭声音" : "开启声音"}>{soundEnabled ? "♪" : "×"}</button>
       <div className="setup-ledger__scroll">
         <small>TABLE 002 · ENTRY</small>
@@ -220,6 +222,7 @@ interface TableLedgerProps {
   onAssistChange: (enabled: boolean) => void;
   onFinishClassic: () => void;
   onAbandonChallenge: () => void;
+  showCloseButton?: boolean;
 }
 
 export function TableLedger({
@@ -230,6 +233,7 @@ export function TableLedger({
   onAssistChange,
   onFinishClassic,
   onAbandonChallenge,
+  showCloseButton = true,
 }: TableLedgerProps) {
   const [confirmAbandon, setConfirmAbandon] = useState(false);
   const session = root.activeSession;
@@ -241,7 +245,7 @@ export function TableLedger({
 
   return (
     <article className="rule-ledger table-ledger">
-      <button type="button" className="rule-ledger__close" onClick={onClose} aria-label="关闭牌桌册">×</button>
+      {showCloseButton && <button type="button" className="rule-ledger__close" onClick={onClose} aria-label="关闭牌桌册">×</button>}
       <small>TABLE LEDGER · 002</small>
       <h2 id="twenty-one-ledger-title">牌桌册</h2>
       <div className="tw-ledger-tabs" role="tablist" aria-label="牌桌册栏目">

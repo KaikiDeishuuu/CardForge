@@ -1,16 +1,11 @@
 .guandan-screen {
-  --cf-color-table: #153d39;
-  --cf-color-table-subtle: #1d4a45;
-  --cf-color-accent: #a94b3b;
-  --gd-table: #153d39;
-  --gd-table-raised: #1d4a45;
-  --gd-surface: #f8f7f2;
-  --gd-card: #fffef9;
-  --gd-ink: #17221f;
-  --gd-muted: #63706c;
-  --gd-red: #a94b3b;
-  --gd-blue: #39706c;
-  --gd-line: rgb(255 255 255 / 14%);
+  --gd-table: var(--cf-color-table);
+  --gd-card: var(--cf-color-card);
+  --gd-ink: var(--cf-color-text);
+  --gd-muted: var(--cf-color-text-muted);
+  --gd-red: var(--cf-color-accent);
+  --gd-blue: var(--cf-color-table-subtle);
+  --gd-line: var(--cf-color-border-on-table);
 }
 
 .guandan-screen button {
@@ -18,7 +13,7 @@
 }
 
 .guandan-topbar {
-  background: rgb(15 47 44 / 92%);
+  background: color-mix(in srgb, var(--cf-color-table) 88%, var(--cf-color-card-text));
 }
 
 .gd-game-status {
@@ -26,7 +21,7 @@
 }
 
 .gd-game-status.is-paused {
-  color: #f0c87b;
+  color: var(--cf-color-warning-on-table);
 }
 
 .gd-table-content {
@@ -47,7 +42,7 @@
   align-items: center;
   gap: clamp(0.75rem, 3vw, 1.5rem);
   color: var(--cf-color-text-on-table-muted);
-  background: rgb(255 255 255 / 4%);
+  background: color-mix(in srgb, var(--cf-color-text-on-table) 4%, transparent);
   border-bottom: 1px solid var(--gd-line);
   font-size: 0.75rem;
 }
@@ -75,8 +70,9 @@
 }
 
 .gd-level-track i.is-level {
-  color: var(--cf-color-accent-contrast);
-  background: var(--gd-red);
+  color: var(--cf-color-text-on-table);
+  background: color-mix(in srgb, var(--gd-red) 10%, transparent);
+  box-shadow: inset 0 0 0 1px var(--gd-red);
 }
 
 .gd-match-score {
@@ -92,7 +88,7 @@
   align-items: center;
   gap: 0.375rem;
   color: var(--cf-color-text-on-table-muted);
-  background: rgb(255 255 255 / 7%);
+  background: color-mix(in srgb, var(--cf-color-text-on-table) 7%, transparent);
   border: 1px solid transparent;
   border-radius: var(--cf-radius-pill);
   font-size: 0.75rem;
@@ -106,15 +102,16 @@
 
 .gd-match-score__team.is-attacking {
   color: var(--cf-color-text-on-table);
-  border-color: rgb(255 255 255 / 32%);
+  border-color: color-mix(in srgb, var(--cf-color-text-on-table) 32%, transparent);
 }
 
 .gd-match-score__team--vermillion.is-attacking {
-  background: rgb(169 75 59 / 32%);
+  background: color-mix(in srgb, var(--gd-red) 10%, transparent);
+  border-color: var(--gd-red);
 }
 
 .gd-match-score__team--indigo.is-attacking {
-  background: rgb(57 112 108 / 40%);
+  background: color-mix(in srgb, var(--cf-color-text-on-table) 10%, transparent);
 }
 
 .gd-arena {
@@ -140,7 +137,7 @@
   align-items: center;
   gap: 0.375rem;
   color: var(--cf-color-text-on-table);
-  background: rgb(255 255 255 / 5%);
+  background: color-mix(in srgb, var(--cf-color-text-on-table) 5%, transparent);
   border: 1px solid var(--gd-line);
   border-radius: var(--cf-radius-md);
   transition: background-color 160ms ease, border-color 160ms ease;
@@ -165,8 +162,8 @@
 }
 
 .gd-seat.is-active {
-  background: rgb(255 255 255 / 10%);
-  border-color: rgb(240 182 77 / 72%);
+  background: color-mix(in srgb, var(--gd-red) 8%, transparent);
+  border-color: var(--gd-red);
 }
 
 .gd-seat__avatar {
@@ -174,7 +171,7 @@
   height: 2rem;
   display: grid;
   place-items: center;
-  color: #fff;
+  color: var(--cf-color-text-on-table);
   background: var(--gd-blue);
   border-radius: 50%;
   font-size: 0.8125rem;
@@ -182,7 +179,8 @@
 }
 
 .gd-seat--vermillion .gd-seat__avatar {
-  background: var(--gd-red);
+  background: color-mix(in srgb, var(--gd-red) 12%, var(--gd-blue));
+  box-shadow: inset 0 0 0 1px var(--gd-red);
 }
 
 .gd-seat__copy {
@@ -218,7 +216,7 @@
 .gd-seat__place {
   grid-column: 1 / -1;
   justify-self: end;
-  color: #f4d89f;
+  color: var(--cf-color-text-on-table-muted);
   font-size: 0.75rem;
 }
 
@@ -238,13 +236,13 @@
   justify-self: center;
   flex-direction: column;
   overflow: hidden;
-  background: rgb(255 255 255 / 5%);
+  background: color-mix(in srgb, var(--cf-color-text-on-table) 5%, transparent);
   border: 1px solid var(--gd-line);
   border-radius: var(--cf-radius-lg);
 }
 
 .gd-trick.is-bomb {
-  border-color: rgb(255 150 130 / 68%);
+  border-color: var(--gd-red);
 }
 
 .gd-trick header {
@@ -293,7 +291,7 @@
 .gd-trick__empty {
   padding: 0.375rem 0.75rem;
   color: var(--cf-color-text-on-table-muted);
-  border: 1px dashed rgb(255 255 255 / 20%);
+  border: 1px dashed color-mix(in srgb, var(--cf-color-text-on-table) 20%, transparent);
   border-radius: var(--cf-radius-pill);
   font-size: 0.75rem;
 }
@@ -310,7 +308,7 @@
 }
 
 .gd-trick > p.is-thinking {
-  color: #f0c87b;
+  color: var(--cf-color-warning-on-table);
 }
 
 .gd-thinking-dots {
@@ -347,7 +345,7 @@
 .gd-turn-flag i {
   width: 0.5rem;
   height: 0.5rem;
-  background: var(--gd-blue);
+  background: var(--cf-color-text-on-table-muted);
   border-radius: 50%;
 }
 
@@ -387,7 +385,7 @@
 }
 
 .gd-hand-heading strong i {
-  color: var(--gd-red);
+  color: var(--cf-color-accent-text);
   font-style: normal;
 }
 
@@ -406,7 +404,7 @@
 }
 
 .gd-selection-status.is-error {
-  color: var(--cf-color-danger);
+  color: var(--cf-color-danger-text);
   font-weight: 650;
 }
 
@@ -424,9 +422,9 @@
 }
 
 .gd-autoplay.is-on {
-  color: #fff;
-  background: var(--gd-blue);
-  border-color: var(--gd-blue);
+  color: var(--cf-color-accent-text);
+  background: color-mix(in srgb, var(--gd-red) 8%, transparent);
+  border-color: var(--gd-red);
 }
 
 .gd-hand-rows {
@@ -461,9 +459,9 @@
   padding: 0;
   flex: 0 0 auto;
   display: block;
-  color: #182a31;
+  color: var(--cf-color-card-text);
   background: var(--gd-card);
-  border: 1px solid #c9cec9;
+  border: 1px solid color-mix(in srgb, var(--cf-color-card-text) 18%, transparent);
   border-radius: 0.5rem;
   box-shadow: var(--cf-shadow-sm);
   font-family: Georgia, "Times New Roman", serif;
@@ -478,7 +476,7 @@ button.gd-card {
 }
 
 button.gd-card:hover:not(:disabled) {
-  border-color: #87938f;
+  border-color: var(--cf-color-card-muted);
 }
 
 button.gd-card:disabled {
@@ -487,7 +485,7 @@ button.gd-card:disabled {
 }
 
 button.gd-card.is-selected {
-  background: #fff8ed;
+  background: color-mix(in srgb, var(--gd-red) 4%, var(--cf-color-card));
   border-color: var(--gd-red);
   box-shadow: inset 0 0 0 2px var(--gd-red);
   transform: translateY(-0.1875rem);
@@ -514,14 +512,14 @@ button.gd-card.is-selected::after {
 }
 
 .gd-card.is-wild {
-  background: #fff7e8;
-  border-color: #c89d54;
+  background: var(--cf-color-card);
+  border-color: var(--cf-color-card-muted);
 }
 
 .gd-card--hearts,
 .gd-card--diamonds,
 .gd-card--big-joker {
-  color: #a23238;
+  color: var(--cf-color-card-red);
 }
 
 .gd-card__rank {
@@ -567,7 +565,7 @@ button.gd-card.is-selected::after {
   height: 1.25rem;
   display: grid;
   place-items: center;
-  color: #fff;
+  color: var(--cf-color-accent-contrast);
   background: var(--gd-red);
   border-radius: 50%;
   font-family: var(--cf-font-sans);
@@ -580,13 +578,9 @@ button.gd-card.is-selected::after {
   right: 0.35rem;
   width: 0.2rem;
   height: 0.2rem;
-  background: #9d8050;
+  background: var(--cf-color-card-muted);
   border-radius: 50%;
   opacity: 0.55;
-}
-
-.gd-card__deck-dot--1 {
-  box-shadow: -0.3rem 0 0 #9d8050;
 }
 
 .gd-card.is-compact {
@@ -632,9 +626,9 @@ button.gd-card.is-selected::after {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  color: #6d352e;
-  background: #fff0d7;
-  border: 1px solid #d9a69b;
+  color: var(--cf-color-text);
+  background: color-mix(in srgb, var(--cf-color-accent) 6%, var(--cf-color-surface-raised));
+  border: 1px solid color-mix(in srgb, var(--cf-color-accent) 40%, var(--cf-color-border));
   border-radius: var(--cf-radius-md);
   font-size: 0.8125rem;
 }
@@ -643,7 +637,7 @@ button.gd-card.is-selected::after {
   min-height: var(--cf-touch-target);
   padding: 0.5rem 0.75rem;
   flex: 0 0 auto;
-  color: #fff;
+  color: var(--cf-color-accent-contrast);
   background: var(--gd-red);
   border: 0;
   border-radius: var(--cf-radius-md);
@@ -712,7 +706,7 @@ button.gd-card.is-selected::after {
 
 .gd-rule-board__scope {
   padding-left: 0.75rem;
-  border-left: 3px solid #c69b51;
+  border-left: 3px solid var(--cf-color-accent);
 }
 
 .gd-difficulty {
@@ -749,9 +743,9 @@ button.gd-card.is-selected::after {
 }
 
 .gd-difficulty button.is-selected {
-  color: #fff;
-  background: var(--gd-blue);
-  border-color: var(--gd-blue);
+  color: var(--cf-color-accent-text);
+  background: color-mix(in srgb, var(--cf-color-accent) 8%, var(--cf-color-surface));
+  border-color: var(--cf-color-accent);
 }
 
 .gd-difficulty button strong {
@@ -769,7 +763,7 @@ button.gd-card.is-selected::after {
   min-width: min(100%, 12rem);
   min-height: var(--cf-control-height-lg);
   padding: 0 1.25rem;
-  color: #fff;
+  color: var(--cf-color-accent-contrast);
   background: var(--gd-red);
   border: 0;
   border-radius: var(--cf-radius-md);
@@ -840,9 +834,9 @@ button.gd-card.is-selected::after {
 }
 
 .gd-level-gain .is-target {
-  color: #fff;
-  background: var(--gd-red);
-  border-color: var(--gd-red);
+  color: var(--cf-color-accent-text);
+  background: color-mix(in srgb, var(--cf-color-accent) 8%, transparent);
+  border-color: var(--cf-color-accent);
 }
 
 .gd-finish-order {
@@ -866,7 +860,7 @@ button.gd-card.is-selected::after {
 }
 
 .gd-finish-order b {
-  color: var(--gd-red);
+  color: var(--cf-color-accent-text);
 }
 
 .gd-result-actions {
@@ -878,7 +872,7 @@ button.gd-card.is-selected::after {
 
 .gd-result-actions button {
   min-height: var(--cf-control-height-lg);
-  color: #fff;
+  color: var(--cf-color-accent-contrast);
   background: var(--gd-red);
   border: 1px solid var(--gd-red);
   border-radius: var(--cf-radius-md);

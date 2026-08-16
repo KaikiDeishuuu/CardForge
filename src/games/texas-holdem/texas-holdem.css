@@ -1,12 +1,9 @@
 @import url("../../styles/tokens.css");
 
 .texas-holdem-screen {
-  --cf-color-accent: #a84f3d;
   --cf-game-content-padding: clamp(0.5rem, 2vw, 1.25rem);
   --poker-card-width: clamp(2.8rem, 14vw, 4.75rem);
-  background:
-    radial-gradient(circle at 50% 42%, rgb(50 111 98 / 32%), transparent 42%),
-    #123a34;
+  background: var(--cf-color-table);
 }
 
 .texas-holdem-screen button {
@@ -14,7 +11,7 @@
 }
 
 .holdem-topbar {
-  background: rgb(8 39 34 / 88%);
+  background: color-mix(in srgb, var(--cf-color-table) 88%, var(--cf-color-card-text));
 }
 
 .holdem-game-status {
@@ -25,7 +22,7 @@
 }
 
 .holdem-game-status.is-paused {
-  color: #f2d7a8;
+  color: var(--cf-color-warning-on-table);
 }
 
 .holdem-table-content {
@@ -54,7 +51,7 @@
   align-items: center;
   gap: 0.3rem 0.75rem;
   color: var(--cf-color-text-on-table);
-  background: rgb(5 31 27 / 32%);
+  background: color-mix(in srgb, var(--cf-color-text-on-table) 4%, transparent);
   border: 1px solid var(--cf-color-border-on-table);
   border-radius: var(--cf-radius-md);
   transition: border-color 160ms ease, background-color 160ms ease;
@@ -68,17 +65,16 @@
 .holdem-seat--human {
   width: min(100%, 42rem);
   justify-self: center;
-  background: rgb(5 31 27 / 48%);
+  background: color-mix(in srgb, var(--cf-color-text-on-table) 8%, transparent);
 }
 
 .holdem-seat.is-active {
-  background: rgb(48 106 92 / 45%);
-  border-color: rgb(244 215 163 / 70%);
-  box-shadow: inset 3px 0 0 #e2b969;
+  background: color-mix(in srgb, var(--cf-color-accent) 8%, transparent);
+  border-color: var(--cf-color-accent);
 }
 
 .holdem-seat.is-winner {
-  border-color: #e2b969;
+  border-color: var(--cf-color-accent);
 }
 
 .holdem-seat.is-folded {
@@ -99,16 +95,16 @@
   flex: 0 0 2.5rem;
   display: grid;
   place-items: center;
-  color: #193c36;
-  background: #eee9dc;
+  color: var(--cf-color-card-text);
+  background: var(--cf-color-card);
   border-radius: 50%;
   font-size: var(--cf-font-size-sm);
   font-weight: 800;
 }
 
 .holdem-seat--opponent .holdem-seat__avatar {
-  color: #e8eee9;
-  background: #506c65;
+  color: var(--cf-color-text-on-table);
+  background: var(--cf-color-table-subtle);
 }
 
 .holdem-seat__copy {
@@ -144,7 +140,7 @@
 }
 
 .holdem-seat__chips b {
-  color: #f4d79f;
+  color: var(--cf-color-text-on-table);
   font-size: var(--cf-font-size-lg);
   font-variant-numeric: tabular-nums;
 }
@@ -179,7 +175,7 @@
 }
 
 .holdem-seat__state > b {
-  color: #efd29c;
+  color: var(--cf-color-text-on-table);
   font-weight: 650;
 }
 
@@ -188,9 +184,12 @@
   font-style: normal;
 }
 
-.holdem-seat__state .is-thinking,
+.holdem-seat__state .is-thinking {
+  color: var(--cf-color-warning-on-table);
+}
+
 .holdem-waiting-actions .is-thinking {
-  color: #f4d79f;
+  color: var(--cf-color-text-muted);
 }
 
 .poker-card {
@@ -207,19 +206,19 @@
 }
 
 .poker-card--face {
-  color: #17201e;
-  background: #fffdf7;
-  border: 1px solid rgb(14 31 27 / 18%);
-  box-shadow: 0 2px 7px rgb(3 21 18 / 24%);
+  color: var(--cf-color-card-text);
+  background: var(--cf-color-card);
+  border: 1px solid color-mix(in srgb, var(--cf-color-card-text) 18%, transparent);
+  box-shadow: var(--cf-shadow-sm);
 }
 
 .poker-card--face.is-red {
-  color: #b64237;
+  color: var(--cf-color-card-red);
 }
 
 .poker-card--face.is-emphasized {
-  border-color: #e3b95f;
-  box-shadow: 0 0 0 2px #e3b95f, 0 3px 9px rgb(3 21 18 / 30%);
+  border-color: var(--cf-color-accent);
+  box-shadow: inset 0 0 0 2px var(--cf-color-accent);
 }
 
 .poker-card__corner {
@@ -254,12 +253,10 @@
 .poker-card--back {
   display: grid;
   place-items: center;
-  color: rgb(255 255 255 / 72%);
-  background:
-    linear-gradient(135deg, transparent 42%, rgb(255 255 255 / 9%) 42% 50%, transparent 50%) 0 0 / 0.65rem 0.65rem,
-    #814438;
-  border: 0.2rem solid #eee8d9;
-  box-shadow: 0 2px 7px rgb(3 21 18 / 25%);
+  color: var(--cf-color-card);
+  background: var(--cf-color-card-text);
+  border: 0.2rem solid var(--cf-color-card);
+  box-shadow: var(--cf-shadow-sm);
   font-family: var(--cf-font-display);
   font-size: var(--cf-font-size-xs);
   font-weight: 800;
@@ -267,9 +264,9 @@
 }
 
 .poker-card--placeholder {
-  background: rgb(3 28 24 / 14%);
-  border: 1px dashed rgb(255 255 255 / 22%);
-  box-shadow: inset 0 0 0 0.22rem rgb(255 255 255 / 2%);
+  background: color-mix(in srgb, var(--cf-color-text-on-table) 4%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--cf-color-text-on-table) 22%, transparent);
+  box-shadow: inset 0 0 0 0.22rem color-mix(in srgb, var(--cf-color-text-on-table) 2%, transparent);
 }
 
 .holdem-board-zone {
@@ -294,8 +291,8 @@
   display: flex;
   align-items: baseline;
   gap: 0.4rem;
-  color: #193a34;
-  background: #eee9dc;
+  color: var(--cf-color-card-text);
+  background: var(--cf-color-card);
   border-radius: var(--cf-radius-pill);
 }
 
@@ -311,7 +308,7 @@
 }
 
 .holdem-pot i {
-  color: var(--cf-color-text-on-table-muted);
+  color: var(--cf-color-card-muted);
   font-style: normal;
 }
 
@@ -385,17 +382,17 @@
 .holdem-action {
   padding: 0.35rem 0.5rem;
   color: var(--cf-color-text);
-  background: #e9e7df;
+  background: var(--cf-color-surface-raised);
 }
 
 .holdem-action:hover,
 .holdem-raise-presets button:hover,
 .holdem-dialog-secondary:hover {
-  background: #dedbd1;
+  background: var(--cf-color-canvas);
 }
 
 .holdem-action--fold {
-  color: var(--cf-color-danger);
+  color: var(--cf-color-danger-text);
   background: transparent;
   border: 1px solid var(--cf-color-border);
 }
@@ -410,7 +407,7 @@
 .holdem-action--raise:hover,
 .holdem-finished-actions button:hover,
 .holdem-dialog-primary:hover {
-  background: #914131;
+  background: color-mix(in srgb, var(--cf-color-accent) 88%, var(--cf-color-card-text));
 }
 
 .holdem-action:disabled,
@@ -478,14 +475,14 @@
   justify-content: center;
   gap: 0.3rem;
   color: var(--cf-color-text);
-  background: #e9e7df;
+  background: var(--cf-color-surface-raised);
   border: 1px solid transparent;
 }
 
 .holdem-raise-presets button.is-selected {
-  color: var(--cf-color-accent);
-  background: #f4e6df;
-  border-color: rgb(168 79 61 / 38%);
+  color: var(--cf-color-accent-text);
+  background: color-mix(in srgb, var(--cf-color-accent) 8%, var(--cf-color-surface-raised));
+  border-color: var(--cf-color-accent);
 }
 
 .holdem-raise-presets small {
@@ -614,11 +611,11 @@
 
 .holdem-dialog-secondary {
   color: var(--cf-color-text);
-  background: #e9e7df;
+  background: var(--cf-color-surface-raised);
 }
 
 .holdem-dialog-danger {
-  color: #fff;
+  color: var(--cf-color-danger-contrast);
   background: var(--cf-color-danger);
 }
 
@@ -629,7 +626,7 @@
 
 .holdem-save-panel button {
   width: 100%;
-  color: #fff;
+  color: var(--cf-color-danger-contrast);
   background: var(--cf-color-danger);
 }
 
