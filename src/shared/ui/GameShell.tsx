@@ -22,6 +22,7 @@ export interface GameShellProps {
   overlayActive?: boolean;
   statusAriaLive?: "off" | "polite" | "assertive";
   contentLabel?: string;
+  contentRole?: "main" | "region";
   className?: string;
   contentClassName?: string;
   actionDockClassName?: string;
@@ -45,6 +46,7 @@ export function GameShell({
   overlayActive = false,
   statusAriaLive = "polite",
   contentLabel,
+  contentRole,
   className,
   contentClassName,
   actionDockClassName,
@@ -59,7 +61,11 @@ export function GameShell({
             {status}
           </div>
         )}
-        <main className={classes("cf-game-shell__content", contentClassName)} aria-label={contentLabel}>
+        <main
+          className={classes("cf-game-shell__content", contentClassName)}
+          aria-label={contentLabel}
+          role={contentRole}
+        >
           {children}
         </main>
         {actionDock !== undefined && actionDock !== null && (
@@ -228,7 +234,7 @@ export function Dialog({
         tabIndex={-1}
       >
         <div className="cf-dialog__header">
-          <h2 id={headingId}>{title}</h2>
+          <h2 id={headingId} tabIndex={-1}>{title}</h2>
           {onClose && (
             <button type="button" className="cf-dialog__close" onClick={onClose} aria-label={closeLabel}>
               <span aria-hidden="true">×</span>

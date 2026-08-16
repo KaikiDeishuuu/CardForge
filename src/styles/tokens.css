@@ -1,7 +1,8 @@
 :root {
   /* Typography */
   --cf-font-sans: "Avenir Next", "PingFang SC", "Microsoft YaHei", sans-serif;
-  --cf-font-display: "Bodoni 72", "Didot", "Songti SC", "Noto Serif CJK SC", serif;
+  --cf-font-display: "Bodoni 72", "Didot", "Songti SC", "STSong", "Source Han Serif SC", "Noto Serif CJK SC", serif;
+  --cf-font-label: var(--cf-font-sans);
   --cf-font-mono: "SFMono-Regular", "Cascadia Code", "Roboto Mono", monospace;
 
   --cf-font-size-xs: 0.75rem;
@@ -14,26 +15,43 @@
   --cf-line-height-normal: 1.5;
   --cf-line-height-relaxed: 1.7;
 
-  /* A quiet, semantic palette. A game may override only --cf-color-accent. */
-  --cf-color-canvas: #eef1ef;
-  --cf-color-surface: #f8f7f2;
-  --cf-color-surface-raised: #fffef9;
-  --cf-color-table: #173d39;
-  --cf-color-table-subtle: #214a45;
-  --cf-color-text: #17221f;
-  --cf-color-text-muted: #63706c;
-  --cf-color-text-on-table: #f4f7f4;
-  --cf-color-text-on-table-muted: #bdcbc7;
-  --cf-color-border: rgb(23 34 31 / 14%);
-  --cf-color-border-on-table: rgb(255 255 255 / 16%);
-  --cf-color-accent: #a94b3b;
-  --cf-color-accent-contrast: #fff;
-  --cf-color-focus: #f0b64d;
-  --cf-color-focus-contrast: #102f2c;
-  --cf-color-success: #2f7a5c;
-  --cf-color-warning: #a76a1d;
-  --cf-color-danger: #b7473f;
-  --cf-color-scrim: rgb(8 19 17 / 58%);
+  /* Xuan paper, ink steps, and a single cinnabar accent. */
+  --cf-color-canvas: #e4dfd3;
+  --cf-color-surface: #edeae1;
+  --cf-color-surface-raised: #f6f4ed;
+
+  /* Physical cards never reverse in dark mode. */
+  --cf-color-card: #f6f4ed;
+  --cf-color-card-text: #17161a;
+  --cf-color-card-muted: #625f57;
+  --cf-color-card-red: #9e3b32;
+
+  --cf-color-table: #2b2a26;
+  --cf-color-table-subtle: #3a3833;
+  --cf-color-text: #17161a;
+  --cf-color-text-muted: #625f57;
+  --cf-color-text-on-table: #ece8dd;
+  --cf-color-text-on-table-muted: #a8a49a;
+  --cf-color-border: rgb(23 22 20 / 14%);
+  --cf-color-border-on-table: rgb(236 232 221 / 16%);
+
+  --cf-color-accent: #9e3b32;
+  --cf-color-accent-text: #9e3b32;
+  --cf-color-accent-on-table: #dd7265;
+  --cf-color-accent-contrast: #f6f4ed;
+  --cf-color-focus: #c4564a;
+  --cf-color-focus-contrast: #17161a;
+  --cf-color-success: #4a5f4a;
+  --cf-color-success-text: #4a5f4a;
+  --cf-color-success-on-table: #8aa28a;
+  --cf-color-warning: #725421;
+  --cf-color-warning-text: #725421;
+  --cf-color-warning-on-table: #c49a51;
+  --cf-color-danger: #9e3b32;
+  --cf-color-danger-text: #9e3b32;
+  --cf-color-danger-on-table: #dd7265;
+  --cf-color-danger-contrast: #f6f4ed;
+  --cf-color-scrim: rgb(23 22 20 / 62%);
 
   /* Spacing: a compact 4px-based scale. */
   --cf-space-0: 0;
@@ -55,13 +73,13 @@
   --cf-touch-target: 2.75rem;
 
   /* Shape and elevation. */
-  --cf-radius-sm: 0.5rem;
-  --cf-radius-md: 0.75rem;
-  --cf-radius-lg: 0.75rem;
+  --cf-radius-sm: 2px;
+  --cf-radius-md: 2px;
+  --cf-radius-lg: 2px;
   --cf-radius-pill: 999px;
-  --cf-shadow-sm: 0 1px 2px rgb(8 19 17 / 10%);
-  --cf-shadow-md: 0 8px 24px rgb(8 19 17 / 16%);
-  --cf-shadow-dialog: 0 20px 60px rgb(8 19 17 / 28%);
+  --cf-shadow-sm: none;
+  --cf-shadow-md: 0 1px 2px rgb(23 22 20 / 8%);
+  --cf-shadow-dialog: 0 12px 40px rgb(23 22 20 / 24%);
 
   /* Shared stacking order. Local game artwork should stay below sticky UI. */
   --cf-z-base: 0;
@@ -74,4 +92,37 @@
   /* Shared shell dimensions. */
   --cf-topbar-height: 3.75rem;
   --cf-content-max-width: 90rem;
+
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --cf-color-canvas: #17161a;
+    --cf-color-surface: #201f1c;
+    --cf-color-surface-raised: #2b2a26;
+    --cf-color-text: #ece8dd;
+    --cf-color-text-muted: #b8b3a8;
+    --cf-color-border: rgb(236 232 221 / 14%);
+    /*
+     * --cf-color-table keeps its light value here because the table is already
+     * ink, which lands it on the same #2b2a26 as a raised panel. The panel
+     * cannot move: #2b2a26 is the lightest ground where the bright on-table
+     * semantics below still clear 4.5:1 (cinnabar sits at exactly 4.56:1).
+     * So the backdrop moves instead — a neutral-black scrim drops the ground to
+     * #0c0c0b and restores the paper-on-ink separation (1.16:1 -> 1.36:1).
+     */
+    --cf-color-scrim: rgb(0 0 0 / 72%);
+    /* Ink-tinted shadows are invisible on an ink ground. */
+    --cf-shadow-md: 0 1px 2px rgb(0 0 0 / 40%);
+    --cf-shadow-dialog: 0 12px 40px rgb(0 0 0 / 55%);
+    --cf-color-accent: #b8483d;
+    --cf-color-accent-text: #dd7265;
+    --cf-color-accent-contrast: #f6f4ed;
+    --cf-color-success-text: #8aa28a;
+    --cf-color-warning-text: #c49a51;
+    --cf-color-danger: #b8483d;
+    --cf-color-danger-text: #dd7265;
+    --cf-color-danger-contrast: #f6f4ed;
+  }
 }

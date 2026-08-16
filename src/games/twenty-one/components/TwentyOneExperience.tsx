@@ -2,8 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties, type Dispatch, type S
 import type { GameRuntimeProps } from "../../../core/games/types";
 import { useSound } from "../../../shared/audio/SoundProvider";
 import { playbackDelay, usePlaybackSpeed } from "../../../shared/settings/usePlaybackSpeed";
-import { GameTopBar, ToolMenu, type GameToolAction } from "../../../shared/ui/GameShell";
-import { useModalFocus } from "../../../shared/ui/useModalFocus";
+import { Dialog, GameShell, GameTopBar, ToolMenu, type GameToolAction } from "../../../shared/ui/GameShell";
 import {
   createInitialState,
   evaluateHand,
@@ -41,6 +40,7 @@ import { OutcomeTicket, SessionSummary } from "./ResultPanels";
 import { PlayerHands } from "./PlayerHands";
 import { SetupLedger, TableLedger, type LedgerTab } from "./TablePanels";
 import { PlayingCard } from "./PlayingCard";
+import { outcomeTicketTitle, sessionSummaryTitle } from "./resultPresentation";
 
 function ScoreDial({ value, label }: { value: number; label: string }) {
   const clamped = Math.min(value, 21);
@@ -175,29 +175,13 @@ function ActiveTable({ root, setRoot, onExit, restoredNotice, saveUnavailable }:
     return () => window.clearTimeout(timer);
   }, [informationOverlayOpen, playbackSpeed, state.phase, state.settlement]);
 
-  const ledgerRef = useModalFocus({
-    active: ledgerOpen,
-    initialFocus: ".tw-ledger-tabs button",
-    onDismiss: () => setLedgerOpen(false),
-    restoreFocus: ".cf-game-topbar__more",
-  });
   const settlementPresented = state.phase !== "settled" || presentedSettlement === state.settlement;
   const resultVisible = state.phase === "settled"
     && Boolean(state.settlement)
     && settlementPresented
     && session.status === "playing"
     && !informationOverlayOpen;
-  const resultRef = useModalFocus({
-    active: resultVisible,
-    initialFocus: ".outcome-ticket__actions button",
-    restoreFocus: ".cf-game-topbar__more",
-  });
   const summaryVisible = session.status === "summary" && settlementPresented && !informationOverlayOpen;
-  const summaryRef = useModalFocus({
-    active: summaryVisible,
-    initialFocus: ".outcome-ticket__actions button",
-    restoreFocus: ".cf-game-topbar__more",
-  });
   const overlayOpen = informationOverlayOpen || resultVisible || summaryVisible;
 
   function applyAction(action: TwentyOneAction, cue: "tap" | "card" | "hit" = "tap") {
@@ -265,9 +249,136 @@ function ActiveTable({ root, setRoot, onExit, restoredNotice, saveUnavailable }:
     },
   ];
 
+  const actionDock = (
+    <>
+      <div className="decision-dock__copy">
+        <small>{state.phase === "betting" ? `第 ${state.handNumber} 手 · 下注` : state.phase === "insurance" ? "边注窗口" : state.phase === "player-turn" ? `手牌 ${(state.activeHandIndex ?? 0) + 1} · 你的判断` : state.phase === "dealer-turn" ? "庄家行动中" : "本轮已落定"}</small>
+        <strong>{tableMessage}</strong>
+      </div>
+
+      {state.phase === "betting" ? (
+        <div className="bet-actions">
+          {repeatBetAvailable && lastBet !== undefined && (
+            <button
+              type="button"
+              className="bet-chip bet-chip--repeat"
+              onClick={() => applyAction({ type: "place-bet", amount: lastBet }, "card")}
+              aria-label={`重复上一注 ${lastBet}`}
+            >
+              沿用 {lastBet}
+            </button>
+          )}
+          {legal.bets
+            .filter((amount) => !repeatBetAvailable || amount !== lastBet)
+            .map((amount) => <button key={amount} type="button" className="bet-chip" onClick={() => applyAction({ type: "place-bet", amount }, "card")} aria-label={`压 ${amount} 枚筹码`}>{amount}</button>)}
+        </div>
+      ) : state.phase === "insurance" ? (
+        <div className="insurance-actions">
+          <button type="button" className={actionClass("decline-insurance", "decision-button decision-button--stand")} onClick={() => applyAction({ type: "decline-insurance" })} disabled={!legal.declineInsurance}><span>不买保险</span><small>DECLINE</small></button>
+          <button type="button" className={actionClass("take-insurance", "decision-button decision-button--double")} onClick={() => applyAction({ type: "take-insurance" }, "card")} disabled={!legal.takeInsurance}><span>买保险 {state.baseBet / 2}</span><small>INSURE</small></button>
+          {root.preferences.assistEnabled && <button type="button" className="tw-hint-button" onClick={requestHint}>提示</button>}
+        </div>
+      ) : (
+        <div className="decision-actions decision-actions--expanded">
+          <div className="decision-actions__primary">
+            <button type="button" className={actionClass("stand", "decision-button decision-button--stand")} onClick={() => applyAction({ type: "stand" })} disabled={!legal.stand} title={legal.stand ? undefined : decisionUnavailableReason(state, "stand")}><span>停牌</span><small>STAND</small></button>
+            <button type="button" className={actionClass("hit", "decision-button decision-button--hit")} onClick={() => applyAction({ type: "hit" }, "card")} disabled={!legal.hit} title={legal.hit ? undefined : decisionUnavailableReason(state, "hit")}><span>要牌</span><small>HIT</small></button>
+          </div>
+          <div className={`decision-actions__secondary ${root.preferences.assistEnabled ? "has-hint" : ""}`}>
+            <button type="button" className={actionClass("double", "tw-secondary-action")} onClick={() => applyAction({ type: "double" }, "hit")} disabled={!legal.double} title={legal.double ? undefined : decisionUnavailableReason(state, "double")}>加倍</button>
+            <button type="button" className={actionClass("split", "tw-secondary-action")} onClick={() => applyAction({ type: "split" }, "card")} disabled={!legal.split} title={legal.split ? undefined : decisionUnavailableReason(state, "split")}>分牌</button>
+            <button type="button" className={actionClass("surrender", "tw-secondary-action")} onClick={() => applyAction({ type: "surrender" })} disabled={!legal.surrender} title={legal.surrender ? undefined : decisionUnavailableReason(state, "surrender")}>投降</button>
+            {root.preferences.assistEnabled && <button type="button" className="tw-secondary-action" onClick={requestHint} disabled={state.phase !== "player-turn"}>提示</button>}
+          </div>
+        </div>
+      )}
+    </>
+  );
+
+  const overlay = (
+    <>
+      <ToolMenu
+        open={toolsOpen}
+        onClose={() => setToolsOpen(false)}
+        actions={toolActions}
+        title="牌桌选项"
+      />
+
+      <Dialog
+        open={ledgerOpen}
+        title="牌桌册"
+        onClose={() => setLedgerOpen(false)}
+        closeLabel="关闭牌桌册"
+        initialFocus=".tw-ledger-tabs button"
+        restoreFocus=".cf-game-topbar__more"
+        className="twenty-one-modal"
+        backdropClassName="twenty-one-modal-backdrop"
+      >
+        <TableLedger
+          root={root}
+          tab={ledgerTab}
+          onTabChange={setLedgerTab}
+          onClose={() => setLedgerOpen(false)}
+          onAssistChange={(enabled) => setRoot((current) => setAssistEnabled(current, enabled))}
+          onFinishClassic={() => {
+            setRoot((current) => finishClassicSession(current));
+            setLedgerOpen(false);
+          }}
+          onAbandonChallenge={() => {
+            setRoot((current) => abandonSession(current));
+            setLedgerOpen(false);
+          }}
+          showCloseButton={false}
+        />
+      </Dialog>
+
+      <Dialog
+        open={resultVisible}
+        title={outcomeTicketTitle(session)}
+        initialFocus=".outcome-ticket__actions button"
+        restoreFocus=".cf-game-topbar__more"
+        className="twenty-one-modal twenty-one-modal--result"
+        backdropClassName="twenty-one-modal-backdrop twenty-one-modal-backdrop--result"
+      >
+        <OutcomeTicket session={session} onNext={() => applyAction({ type: "next-hand" })} onExit={onExit} />
+      </Dialog>
+
+      <Dialog
+        open={summaryVisible}
+        title={sessionSummaryTitle(root)}
+        initialFocus=".outcome-ticket__actions button"
+        restoreFocus=".cf-game-topbar__more"
+        className="twenty-one-modal twenty-one-modal--result"
+        backdropClassName="twenty-one-modal-backdrop twenty-one-modal-backdrop--result"
+      >
+        <SessionSummary
+          root={root}
+          onRetry={() => {
+            setPresentedSettlement(undefined);
+            setRoot((current) => {
+              const currentSession = current.activeSession;
+              if (!currentSession) return current;
+              const rules = currentSession.mode === "challenge" ? STANDARD_SIX_RULES : currentSession.table.rules;
+              return retryActiveSession(current, createInitialState(Math.random, rules));
+            });
+          }}
+          onModeSelect={() => setRoot((current) => returnToModeSelect(current))}
+        />
+      </Dialog>
+    </>
+  );
+
   return (
-    <main className="twenty-one-screen">
-      <div className="twenty-one-surface" inert={overlayOpen || undefined}>
+    <GameShell
+      className="twenty-one-screen"
+      contentClassName="twenty-one-table"
+      contentLabel="二十一刻牌桌"
+      actionDock={actionDock}
+      actionDockClassName="decision-dock"
+      actionDockLabel="二十一刻牌局操作"
+      overlayActive={overlayOpen}
+      overlay={overlay}
+      topBar={(
         <GameTopBar
           className="twenty-one-topbar"
           title={<span className="twenty-one-title"><small>{topbarLabel}</small><strong>二十一刻</strong></span>}
@@ -281,11 +392,12 @@ function ActiveTable({ root, setRoot, onExit, restoredNotice, saveUnavailable }:
           moreOpen={toolsOpen}
           moreLabel="更多牌桌选项"
         />
+      )}
+    >
+      {restoredNotice && <div className="tw-restore-notice" role="status">已恢复{challenge ? `${challenge.name} ${session.roundsCompleted}/${challenge.roundLimit}` : `经典牌桌第 ${state.handNumber} 手`}</div>}
+      {saveUnavailable && <div className="tw-save-warning tw-save-warning--banner" role="alert">本机存档不可用，本次进度只在当前页面保留。</div>}
 
-        {restoredNotice && <div className="tw-restore-notice" role="status">已恢复{challenge ? `${challenge.name} ${session.roundsCompleted}/${challenge.roundLimit}` : `经典牌桌第 ${state.handNumber} 手`}</div>}
-        {saveUnavailable && <div className="tw-save-warning tw-save-warning--banner" role="alert">本机存档不可用，本次进度只在当前页面保留。</div>}
-
-      <section className="twenty-one-table" aria-label="二十一刻牌桌">
+      <section className="twenty-one-table__region" aria-label="二十一刻牌桌">
         <div className="twenty-one-table__arc" aria-hidden="true" />
         <section className="dealer-zone" aria-label="庄家手牌">
           <div className="hand-heading">
@@ -325,103 +437,7 @@ function ActiveTable({ root, setRoot, onExit, restoredNotice, saveUnavailable }:
           <PlayerHands hands={state.hands} activeHandIndex={state.activeHandIndex} latestCardId={latestCardId} />
         </section>
       </section>
-
-      <footer className="decision-dock">
-        <div className="decision-dock__copy">
-          <small>{state.phase === "betting" ? `第 ${state.handNumber} 手 · 下注` : state.phase === "insurance" ? "边注窗口" : state.phase === "player-turn" ? `手牌 ${(state.activeHandIndex ?? 0) + 1} · 你的判断` : state.phase === "dealer-turn" ? "庄家行动中" : "本轮已落定"}</small>
-          <strong>{tableMessage}</strong>
-        </div>
-
-        {state.phase === "betting" ? (
-          <div className="bet-actions">
-            {repeatBetAvailable && lastBet !== undefined && (
-              <button
-                type="button"
-                className="bet-chip bet-chip--repeat"
-                onClick={() => applyAction({ type: "place-bet", amount: lastBet }, "card")}
-                aria-label={`重复上一注 ${lastBet}`}
-              >
-                沿用 {lastBet}
-              </button>
-            )}
-            {legal.bets
-              .filter((amount) => !repeatBetAvailable || amount !== lastBet)
-              .map((amount) => <button key={amount} type="button" className="bet-chip" onClick={() => applyAction({ type: "place-bet", amount }, "card")} aria-label={`压 ${amount} 枚筹码`}>{amount}</button>)}
-          </div>
-        ) : state.phase === "insurance" ? (
-          <div className="insurance-actions">
-            <button type="button" className={actionClass("decline-insurance", "decision-button decision-button--stand")} onClick={() => applyAction({ type: "decline-insurance" })} disabled={!legal.declineInsurance}><span>不买保险</span><small>DECLINE</small></button>
-            <button type="button" className={actionClass("take-insurance", "decision-button decision-button--double")} onClick={() => applyAction({ type: "take-insurance" }, "card")} disabled={!legal.takeInsurance}><span>买保险 {state.baseBet / 2}</span><small>INSURE</small></button>
-            {root.preferences.assistEnabled && <button type="button" className="tw-hint-button" onClick={requestHint}>提示</button>}
-          </div>
-        ) : (
-          <div className="decision-actions decision-actions--expanded">
-            <div className="decision-actions__primary">
-              <button type="button" className={actionClass("stand", "decision-button decision-button--stand")} onClick={() => applyAction({ type: "stand" })} disabled={!legal.stand} title={legal.stand ? undefined : decisionUnavailableReason(state, "stand")}><span>停牌</span><small>STAND</small></button>
-              <button type="button" className={actionClass("hit", "decision-button decision-button--hit")} onClick={() => applyAction({ type: "hit" }, "card")} disabled={!legal.hit} title={legal.hit ? undefined : decisionUnavailableReason(state, "hit")}><span>要牌</span><small>HIT</small></button>
-            </div>
-            <div className={`decision-actions__secondary ${root.preferences.assistEnabled ? "has-hint" : ""}`}>
-              <button type="button" className={actionClass("double", "tw-secondary-action")} onClick={() => applyAction({ type: "double" }, "hit")} disabled={!legal.double} title={legal.double ? undefined : decisionUnavailableReason(state, "double")}>加倍</button>
-              <button type="button" className={actionClass("split", "tw-secondary-action")} onClick={() => applyAction({ type: "split" }, "card")} disabled={!legal.split} title={legal.split ? undefined : decisionUnavailableReason(state, "split")}>分牌</button>
-              <button type="button" className={actionClass("surrender", "tw-secondary-action")} onClick={() => applyAction({ type: "surrender" })} disabled={!legal.surrender} title={legal.surrender ? undefined : decisionUnavailableReason(state, "surrender")}>投降</button>
-              {root.preferences.assistEnabled && <button type="button" className="tw-secondary-action" onClick={requestHint} disabled={state.phase !== "player-turn"}>提示</button>}
-            </div>
-          </div>
-        )}
-      </footer>
-      </div>
-
-      <ToolMenu
-        open={toolsOpen}
-        onClose={() => setToolsOpen(false)}
-        actions={toolActions}
-        title="牌桌选项"
-      />
-
-      {ledgerOpen && (
-        <div ref={ledgerRef} className="twenty-one-modal" role="dialog" aria-modal="true" aria-labelledby="twenty-one-ledger-title" tabIndex={-1}>
-          <TableLedger
-            root={root}
-            tab={ledgerTab}
-            onTabChange={setLedgerTab}
-            onClose={() => setLedgerOpen(false)}
-            onAssistChange={(enabled) => setRoot((current) => setAssistEnabled(current, enabled))}
-            onFinishClassic={() => {
-              setRoot((current) => finishClassicSession(current));
-              setLedgerOpen(false);
-            }}
-            onAbandonChallenge={() => {
-              setRoot((current) => abandonSession(current));
-              setLedgerOpen(false);
-            }}
-          />
-        </div>
-      )}
-
-      {resultVisible && (
-        <div ref={resultRef} className="twenty-one-modal twenty-one-modal--result" role="dialog" aria-modal="true" aria-labelledby="twenty-one-result-title" tabIndex={-1}>
-          <OutcomeTicket session={session} onNext={() => applyAction({ type: "next-hand" })} onExit={onExit} />
-        </div>
-      )}
-
-      {summaryVisible && (
-        <div ref={summaryRef} className="twenty-one-modal twenty-one-modal--result" role="dialog" aria-modal="true" aria-labelledby="twenty-one-summary-title" tabIndex={-1}>
-          <SessionSummary
-            root={root}
-            onRetry={() => {
-              setPresentedSettlement(undefined);
-              setRoot((current) => {
-                const currentSession = current.activeSession;
-                if (!currentSession) return current;
-                const rules = currentSession.mode === "challenge" ? STANDARD_SIX_RULES : currentSession.table.rules;
-                return retryActiveSession(current, createInitialState(Math.random, rules));
-              });
-            }}
-            onModeSelect={() => setRoot((current) => returnToModeSelect(current))}
-          />
-        </div>
-      )}
-    </main>
+    </GameShell>
   );
 }
 
@@ -438,13 +454,6 @@ export function TwentyOneExperience({ onExit, persistence }: GameRuntimeProps) {
   const [saveBlocked, setSaveBlocked] = useState(unreadableRestoredSave);
   const [saveUnavailable, setSaveUnavailable] = useState(false);
   const { enabled: soundEnabled, toggle: toggleSound, play: playSound } = useSound();
-  const setupVisible = root.activeSession === undefined;
-  const setupRef = useModalFocus({
-    active: setupVisible,
-    initialFocus: ".tw-mode-grid button",
-    onDismiss: onExit,
-    restoreFocus: ".cf-game-topbar__more",
-  });
 
   useEffect(() => {
     if (!persistence || saveBlocked || (root.revision === 0 && !persistence.restored)) return;
@@ -492,32 +501,51 @@ export function TwentyOneExperience({ onExit, persistence }: GameRuntimeProps) {
   }
 
   return (
-    <main className="twenty-one-screen twenty-one-screen--setup">
-      <div className="twenty-one-surface" inert>
-        <header className="twenty-one-topbar">
-          <button type="button" className="twenty-one-topbar__button" onClick={onExit} aria-label="返回游戏大厅">←</button>
-          <div className="twenty-one-title"><small>CARDFORGE · TABLE 002</small><strong>二十一刻</strong></div>
-          <div />
-        </header>
-        <section className="twenty-one-table tw-setup-backdrop" aria-hidden="true"><div className="twenty-one-table__arc" /><ScoreDial value={21} label="目标刻度" /></section>
-      </div>
-      <div ref={setupRef} className="twenty-one-modal" role="dialog" aria-modal="true" aria-labelledby="twenty-one-setup-title" tabIndex={-1}>
-        <SetupLedger
-          root={root}
-          onExit={onExit}
-          soundEnabled={soundEnabled}
-          onToggleSound={toggleSound}
-          onStartClassic={startClassic}
-          onStartChallenge={startChallenge}
-          onResetArchive={() => setRoot((current) => resetArchive(current))}
-          saveWarning={saveBlocked
-            ? "现有存档无法安全读取，本次不会覆盖它。"
-            : saveUnavailable
-              ? "本机存档不可用，本次进度只在当前页面保留。"
-              : undefined}
-          onResetSave={saveBlocked ? resetUnreadableSave : undefined}
+    <GameShell
+      className="twenty-one-screen twenty-one-screen--setup"
+      contentClassName="twenty-one-table tw-setup-backdrop"
+      contentLabel="二十一刻设置背景"
+      overlayActive
+      topBar={(
+        <GameTopBar
+          className="twenty-one-topbar"
+          title={<span className="twenty-one-title"><small>CARDFORGE · TABLE 002</small><strong>二十一刻</strong></span>}
+          onBack={onExit}
+          backLabel="返回游戏大厅"
         />
-      </div>
-    </main>
+      )}
+      overlay={(
+        <Dialog
+          open
+          title="选择玩法"
+          onClose={onExit}
+          closeLabel="返回游戏大厅"
+          initialFocus=".tw-mode-grid button"
+          restoreFocus=".cf-game-topbar__more"
+          className="twenty-one-modal twenty-one-modal--setup"
+          backdropClassName="twenty-one-modal-backdrop"
+        >
+          <SetupLedger
+            root={root}
+            onExit={onExit}
+            soundEnabled={soundEnabled}
+            onToggleSound={toggleSound}
+            onStartClassic={startClassic}
+            onStartChallenge={startChallenge}
+            onResetArchive={() => setRoot((current) => resetArchive(current))}
+            saveWarning={saveBlocked
+              ? "现有存档无法安全读取，本次不会覆盖它。"
+              : saveUnavailable
+                ? "本机存档不可用，本次进度只在当前页面保留。"
+                : undefined}
+            onResetSave={saveBlocked ? resetUnreadableSave : undefined}
+            showCloseButton={false}
+          />
+        </Dialog>
+      )}
+    >
+      <div className="twenty-one-table__arc" aria-hidden="true" />
+      <ScoreDial value={21} label="目标刻度" />
+    </GameShell>
   );
 }

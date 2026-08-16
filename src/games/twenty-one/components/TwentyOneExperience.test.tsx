@@ -360,13 +360,13 @@ describe("Twenty One player presentation and assistance", () => {
     const tools = screen.getByRole("dialog", { name: "牌桌选项" });
     expect(within(tools).getByRole("button", { name: /牌局速度/ })).toBeTruthy();
     expect(within(tools).getByRole("button", { name: /关闭声音|开启声音/ })).toBeTruthy();
-    expect(document.querySelector(".twenty-one-surface")?.hasAttribute("inert")).toBe(true);
+    expect(document.querySelector(".cf-game-shell__surface")?.hasAttribute("inert")).toBe(true);
 
     const more = screen.getByRole("button", { name: "更多牌桌选项" });
     fireEvent.click(within(tools).getByRole("button", { name: /牌桌册/ }));
     const ledgerDialog = screen.getByRole("dialog", { name: "牌桌册" });
     expect(ledgerDialog).toBeTruthy();
-    expect(document.querySelector(".twenty-one-surface")?.hasAttribute("inert")).toBe(true);
+    expect(document.querySelector(".cf-game-shell__surface")?.hasAttribute("inert")).toBe(true);
 
     fireEvent.click(within(ledgerDialog).getByRole("button", { name: "关闭牌桌册" }));
     expect(document.activeElement).toBe(more);

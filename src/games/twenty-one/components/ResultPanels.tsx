@@ -1,12 +1,7 @@
 import { evaluateHand } from "../domain/engine";
 import { CHALLENGES, type ActiveTwentyOneSession, type TwentyOneRootState } from "../domain/session";
-import type { HandOutcome, TwentyOneOutcome } from "../domain/types";
-
-const OUTCOME_COPY: Record<TwentyOneOutcome, { eyebrow: string; title: string; mark: string }> = {
-  player: { eyebrow: "判断成立", title: "此刻属于你", mark: "胜" },
-  dealer: { eyebrow: "风险兑现", title: "庄家守住牌桌", mark: "负" },
-  push: { eyebrow: "刻度重合", title: "本局和牌", mark: "和" },
-};
+import type { HandOutcome } from "../domain/types";
+import { OUTCOME_COPY, sessionSummaryTitle } from "./resultPresentation";
 
 const HAND_OUTCOME_COPY: Record<HandOutcome, string> = {
   win: "胜",
@@ -79,9 +74,7 @@ export function SessionSummary({ root, onRetry, onModeSelect }: SessionSummaryPr
   const challenge = session.mode === "challenge" && session.challengeId ? CHALLENGES[session.challengeId] : undefined;
   const cleared = session.endReason === "challenge-cleared";
   const bankrupt = session.endReason === "bankrupt";
-  const title = challenge
-    ? cleared ? "挑战达成" : bankrupt ? "筹码落尽" : "挑战落定"
-    : bankrupt ? "牌桌收起席位" : "这一席已经结账";
+  const title = sessionSummaryTitle(root);
   const mark = challenge ? (cleared ? "成" : "止") : bankrupt ? "尽" : "结";
   const stats = session.sessionStats;
   const record = challenge && session.challengeId

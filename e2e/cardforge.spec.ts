@@ -358,7 +358,9 @@ test("争焰手机端结算与战绩面板保持在视口内并正确管理焦�
   await expectNoDocumentOverflow(page);
 
   await replay.click();
-  await page.getByRole("button", { name: "查看争焰记录" }).click();
+  await page.getByRole("button", { name: "更多选项" }).click();
+  const tools = page.getByRole("dialog", { name: "牌桌选项" });
+  await tools.getByRole("button", { name: "查看争焰记录" }).click();
   const profile = page.getByRole("dialog", { name: "争焰记录" });
   await expect(profile.getByRole("button", { name: "关闭争焰记录" })).toBeFocused();
   await expectElementWithinViewport(page, profile.locator(".profile-sheet"));
