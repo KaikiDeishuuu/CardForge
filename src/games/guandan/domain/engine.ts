@@ -220,6 +220,11 @@ function nextActivePlayerId(players: readonly GuandanPlayer[], from: PlayerId): 
   return from;
 }
 
+function oppositePlayerId(id: PlayerId): PlayerId {
+  const index = PLAYER_ORDER.indexOf(id);
+  return PLAYER_ORDER[(index + 2) % PLAYER_ORDER.length];
+}
+
 function action(
   id: number,
   actorId: GuandanAction["actorId"],
@@ -441,7 +446,14 @@ export function passTurn(state: GuandanState, actorId: PlayerId): GuandanState {
 
   if (passes >= requiredPasses) {
     const trickActor = getPlayer(state, state.trick.actorId);
-    const leader = trickActor.hand.length > 0 ? trickActor.id : nextActivePlayerId(state.players, trickActor.id);
+    const opposite = getPlayer(state, oppositePlayerId(trickActor.id));
+    // 接风：上一手已经走完时由其对家重新领出；对家也已走完才按座次
+    // 顺延到下一位仍有手牌的玩家。
+    const leader = trickActor.hand.length > 0
+      ? trickActor.id
+      : opposite.hand.length > 0
+        ? opposite.id
+        : nextActivePlayerId(state.players, trickActor.id);
     return appendAction({
       ...state,
       activePlayerId: leader,

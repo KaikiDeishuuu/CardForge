@@ -45,4 +45,20 @@ describe("Guandan persistence", () => {
     badPlace.players[0].finishedPlace = 99;
     expect(restoreGuandanState(badPlace)).toBeUndefined();
   });
+
+  it("rejects non-canonical seat metadata that the local table cannot control", () => {
+    const base = JSON.parse(JSON.stringify(createInitialState(() => 0.37)));
+
+    const remoteOpponent = JSON.parse(JSON.stringify(base));
+    remoteOpponent.players[1].controller = "remote";
+    expect(restoreGuandanState(remoteOpponent)).toBeUndefined();
+
+    const renamedPartner = JSON.parse(JSON.stringify(base));
+    renamedPartner.players[2].displayName = "另一位玩家";
+    expect(restoreGuandanState(renamedPartner)).toBeUndefined();
+
+    const reorderedSeats = JSON.parse(JSON.stringify(base));
+    [reorderedSeats.players[1], reorderedSeats.players[2]] = [reorderedSeats.players[2], reorderedSeats.players[1]];
+    expect(restoreGuandanState(reorderedSeats)).toBeUndefined();
+  });
 });

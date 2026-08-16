@@ -18,7 +18,7 @@ function skillTable(pending: boolean): DingState {
   const players: DingPlayer[] = [
     {
       id: "south", displayName: "你", controller: "human", seat: 0,
-      identity: "lord", revealed: true, hp: 4, maxHp: 5, alive: true,
+      identity: "lord", revealed: true, hp: 3, maxHp: 4, alive: true,
       hand: [cost], equipment: {}, heroId: heroIds[0], skillFlags: pending ? { "active:qingnang": true } : {},
     },
     {
@@ -33,7 +33,7 @@ function skillTable(pending: boolean): DingState {
     },
     {
       id: "west", displayName: "西座", controller: "ai", seat: 3,
-      identity: "renegade", revealed: false, hp: 4, maxHp: 4, alive: true,
+      identity: "renegade", revealed: false, hp: 3, maxHp: 3, alive: true,
       hand: [], equipment: {}, heroId: heroIds[3], skillFlags: {},
     },
   ];
@@ -61,6 +61,30 @@ function skillTable(pending: boolean): DingState {
   };
 }
 
+function filteredSkillCostTable(): DingState {
+  const game = skillTable(false);
+  const evade = game.deck.find((card) => card.type === "evade")!;
+  return {
+    ...game,
+    players: game.players.map((player) => {
+      if (player.id === "south") {
+        return {
+          ...player,
+          heroId: "redblade" as const,
+          hp: 4,
+          maxHp: 5,
+          hand: [...player.hand, evade],
+        };
+      }
+      if (player.id === "east") {
+        return { ...player, heroId: "springtide" as const, hp: 3, maxHp: 3 };
+      }
+      return player;
+    }),
+    deck: game.deck.filter((card) => card.id !== evade.id),
+  };
+}
+
 function protectTable(): DingState {
   const deck = buildDeck();
   const strike = deck.find((card) => card.type === "strike")!;
@@ -79,12 +103,12 @@ function protectTable(): DingState {
     },
     {
       id: "north", displayName: "北座", controller: "ai", seat: 2,
-      identity: "lord", revealed: true, hp: 5, maxHp: 5, alive: true,
+      identity: "lord", revealed: true, hp: 4, maxHp: 4, alive: true,
       hand: [], equipment: {}, heroId: heroIds[2], skillFlags: {},
     },
     {
       id: "west", displayName: "西座", controller: "ai", seat: 3,
-      identity: "renegade", revealed: false, hp: 4, maxHp: 4, alive: true,
+      identity: "renegade", revealed: false, hp: 3, maxHp: 3, alive: true,
       hand: [], equipment: {}, heroId: heroIds[3], skillFlags: {},
     },
   ];
@@ -130,12 +154,12 @@ function probeTable(): DingState {
     },
     {
       id: "north", displayName: "北座", controller: "ai", seat: 2,
-      identity: "loyalist", revealed: false, hp: 4, maxHp: 4, alive: true,
+      identity: "loyalist", revealed: false, hp: 3, maxHp: 3, alive: true,
       hand: [], equipment: {}, heroId: heroIds[2], skillFlags: {},
     },
     {
       id: "west", displayName: "西座", controller: "ai", seat: 3,
-      identity: "renegade", revealed: false, hp: 4, maxHp: 4, alive: true,
+      identity: "renegade", revealed: false, hp: 3, maxHp: 3, alive: true,
       hand: [], equipment: {}, heroId: heroIds[3], skillFlags: {},
     },
   ];
@@ -233,6 +257,26 @@ describe("DingDingGame active skill flow", () => {
     expect(screen.getByRole("button", { name: "选择「刺击」作为技能消耗" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "选择你作为技能目标" })).toBeTruthy();
     expect(screen.getByLabelText("结算栈，共 1 层").textContent).toContain("主动技");
+  });
+
+  it("only offers cards that satisfy an active skill's discard filter", () => {
+    const { save } = renderWithState(filteredSkillCostTable());
+
+    fireEvent.click(screen.getByRole("button", { name: "破军" }));
+
+    const confirm = screen.getByRole("button", { name: "确认发动" }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "选择「刺击」作为技能消耗" }));
+    expect(screen.queryByRole("button", { name: "选择「闪避」作为技能消耗" })).toBeNull();
+    expect(confirm.disabled).toBe(false);
+
+    fireEvent.click(confirm);
+
+    expect(screen.queryByText("武将主动技")).toBeNull();
+    const persisted = save.mock.calls.at(-1)?.[2] as DingRootState;
+    const savedState = persisted.activeMatch?.state;
+    expect(savedState?.discard.some((card) => card.type === "strike")).toBe(true);
+    expect(savedState?.players.find((player) => player.id === "south")?.hand.some((card) => card.type === "evade")).toBe(true);
   });
 
   it("shows a post-match review and filters key moments from the full log", () => {

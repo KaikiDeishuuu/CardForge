@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { GameRuntimeProps } from "../../core/games/types";
 import { useSound } from "../../shared/audio/SoundProvider";
 import { playbackDelay, usePlaybackSpeed } from "../../shared/settings/usePlaybackSpeed";
 import { useModalFocus } from "../../shared/ui/useModalFocus";
 import { GuandanCardView } from "./components/GuandanCardView";
-import { chooseAiMove } from "./domain/ai";
+import { chooseAiMove, getAiThinkingDuration } from "./domain/ai";
 import {
   GUANDAN_DIFFICULTY_NAMES,
   NUMBER_RANKS,
@@ -67,6 +67,8 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
   const [showLog, setShowLog] = useState(false);
   const [autoPilot, setAutoPilot] = useState(false);
   const [hintText, setHintText] = useState<string>();
+  const stateRef = useRef(state);
+  const automationGeneration = useRef(0);
   const { enabled: soundEnabled, toggle: toggleSound, play: playSound } = useSound();
   const { speed: playbackSpeed, cycle: cyclePlaybackSpeed } = usePlaybackSpeed();
 
@@ -90,23 +92,38 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
   const handRows = [human.hand.slice(0, handMidpoint), human.hand.slice(handMidpoint)];
 
   useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
+  useEffect(() => {
     if (!aiThinking) return;
 
-    const expectedRevision = state.revision;
+    const scheduledState = state;
     const expectedActor = state.activePlayerId;
+    const generation = automationGeneration.current + 1;
+    automationGeneration.current = generation;
+    const thinkingDelay = Math.max(
+      240,
+      playbackDelay(getAiThinkingDuration(state, expectedActor), playbackSpeed),
+    );
     const timer = window.setTimeout(() => {
+      if (automationGeneration.current !== generation || stateRef.current !== scheduledState) return;
       // Decided once and reused: scanning a 27-card hand for legal combos is the
       // most expensive thing this table does per turn.
-      const move = chooseAiMove(state, expectedActor, state.difficulty);
-      setState((current) => {
-        if (current.revision !== expectedRevision || current.activePlayerId !== expectedActor) return current;
-        return applyMove(current, expectedActor, move);
-      });
+      const move = chooseAiMove(scheduledState, expectedActor, scheduledState.difficulty);
+      if (automationGeneration.current !== generation || stateRef.current !== scheduledState) return;
+      const nextState = applyMove(scheduledState, expectedActor, move);
+      if (nextState === scheduledState) return;
+      stateRef.current = nextState;
+      setState(nextState);
       playSound(move?.kind === "play" ? "card" : "tap");
       setSelectedIds([]);
       setHintText(undefined);
-    }, playbackDelay(460, playbackSpeed));
-    return () => window.clearTimeout(timer);
+    }, thinkingDelay);
+    return () => {
+      window.clearTimeout(timer);
+      if (automationGeneration.current === generation) automationGeneration.current += 1;
+    };
   }, [aiThinking, playSound, playbackSpeed, state]);
 
   useEffect(() => {
@@ -188,8 +205,36 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
     let nextIndex = currentIndex;
     if (event.key === "ArrowLeft") nextIndex -= 1;
     if (event.key === "ArrowRight") nextIndex += 1;
-    if (event.key === "ArrowUp") nextIndex -= handMidpoint;
-    if (event.key === "ArrowDown") nextIndex += handMidpoint;
+    if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+      const currentCard = cards[currentIndex];
+      const currentRow = currentCard.closest<HTMLElement>(".gd-hand-row");
+      const rows = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(".gd-hand-row"));
+      if (!currentRow) return;
+
+      const rowCenter = (row: HTMLElement) => {
+        const rect = row.getBoundingClientRect();
+        return rect.top + rect.height / 2;
+      };
+      const currentRowCenter = rowCenter(currentRow);
+      const direction = event.key === "ArrowUp" ? -1 : 1;
+      const targetRow = rows
+        .filter((row) => (rowCenter(row) - currentRowCenter) * direction > 4)
+        .sort((left, right) => (
+          Math.abs(rowCenter(left) - currentRowCenter) - Math.abs(rowCenter(right) - currentRowCenter)
+        ))[0];
+      if (!targetRow) return;
+
+      const currentRect = currentCard.getBoundingClientRect();
+      const currentCenter = currentRect.left + currentRect.width / 2;
+      const targetCards = cards.filter((card) => card.closest(".gd-hand-row") === targetRow);
+      const targetCard = targetCards.sort((left, right) => {
+        const leftRect = left.getBoundingClientRect();
+        const rightRect = right.getBoundingClientRect();
+        return Math.abs(leftRect.left + leftRect.width / 2 - currentCenter)
+          - Math.abs(rightRect.left + rightRect.width / 2 - currentCenter);
+      })[0];
+      nextIndex = targetCard ? cards.indexOf(targetCard) : currentIndex;
+    }
     if (event.key === "Home") nextIndex = 0;
     if (event.key === "End") nextIndex = cards.length - 1;
 
@@ -229,7 +274,7 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
       ? "本机存档不可用，本次进度只在当前页面保留。"
       : undefined;
   const tableMessage = aiThinking
-    ? `${active.displayName}正在理牌…`
+    ? `${active.displayName}正在理牌`
     : state.lastAction?.text ?? "等待出牌。";
   const opposingPlayers = state.players.filter((player) => player.id === "east" || player.id === "west");
   const partner = getPlayer(state, "partner");
@@ -295,7 +340,11 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
           <Seat key={player.id} player={player} active={state.activePlayerId === player.id} lastActorId={state.lastAction?.actorId === "table" ? undefined : state.lastAction?.actorId} />
         ))}
 
-        <div className={`gd-trick ${state.trick?.combo.type === "bomb" ? "is-bomb" : ""}`} aria-live="polite">
+        <div
+          className={`gd-trick ${state.trick?.combo.type === "bomb" ? "is-bomb" : ""}`}
+          aria-live="polite"
+          aria-busy={aiThinking}
+        >
           <header>
             <span><small>当前牌墩</small><strong>{state.trick?.combo.label ?? "等待领出"}</strong></span>
             {state.trick && <b>{getPlayer(state, state.trick.actorId).displayName} · {state.trick.combo.cards.length} 张</b>}
@@ -305,7 +354,10 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
               <GuandanCardView key={card.id} card={card} levelRank={state.levelRank} compact />
             )) : <span className="gd-trick__empty">贯</span>}
           </div>
-          <p key={state.revision}>{tableMessage}</p>
+          <p key={state.revision} className={aiThinking ? "is-thinking" : undefined}>
+            {tableMessage}
+            {aiThinking && <span className="gd-thinking-dots" aria-hidden="true"><i /><i /><i /></span>}
+          </p>
         </div>
 
         <div className={`gd-turn-flag gd-turn-flag--${active.team}`}>

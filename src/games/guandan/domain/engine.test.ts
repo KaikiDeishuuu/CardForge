@@ -167,7 +167,7 @@ describe("Guandan engine", () => {
     expect(getPlayer(game, "east").hand).toHaveLength(1);
   });
 
-  it("hands the lead to the next active seat when the trick actor just finished", () => {
+  it("lets the finished trick actor's partner catch the lead", () => {
     const eastLast = card("3");
     let game = state([
       { ...player("human", []), finishedPlace: 1 },
@@ -181,7 +181,27 @@ describe("Guandan engine", () => {
     game = passTurn(game, "west");
 
     expect(game.trick).toBeUndefined();
-    expect(game.activePlayerId).toBe("partner");
+    expect(game.activePlayerId).toBe("west");
+  });
+
+  it("falls through to the next active seat when both partners have finished", () => {
+    const opening = classifyCombo([card("9")], "2")!;
+    let game = state([
+      { ...player("human", []), finishedPlace: 1 },
+      player("east", [card("3")]),
+      { ...player("partner", []), finishedPlace: 2 },
+      player("west", [card("4")]),
+    ], {
+      activePlayerId: "east",
+      finishOrder: ["human", "partner"],
+      trick: { actorId: "human", combo: opening },
+    });
+
+    game = passTurn(game, "east");
+    game = passTurn(game, "west");
+
+    expect(game.trick).toBeUndefined();
+    expect(game.activePlayerId).toBe("east");
   });
 
   it("declares a winner when both partners finish", () => {

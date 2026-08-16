@@ -1,5 +1,5 @@
 import { CARD_CATALOG, IDENTITY_NAMES, SEAT_ORDER, buildDeck } from "./data";
-import { HERO_CATALOG, HERO_IDS, heroOf, type ActiveSkillBuff, type ActiveSkillDefinition, type HeroId, type TriggerPoint } from "./heroes";
+import { HERO_CATALOG, HERO_IDS, heroOf, matchesActiveSkillCardFilter, type ActiveSkillBuff, type ActiveSkillDefinition, type HeroId, type TriggerPoint } from "./heroes";
 import type {
   DelayedTrickInstance,
   DingCard,
@@ -91,12 +91,14 @@ function replacePlayer(players: readonly DingPlayer[], id: PlayerId, update: (pl
  * 跨回合保留的标记。其余标记都只在设置它的那个回合内有效。
  *
  * - `buff:next-damage-reduction`（坚壁）：持续到拥有者下个回合开始；
+ * - `buff:distance-to-self`（潜行）：覆盖其他角色随后回合，持续到拥有者下个回合开始；
  * - `silenced`（绝弦）：永久失效，不再恢复；
  * - `delay:*`（困局与断锋/困阵）：由**被指定角色**在自己回合的摸牌阶段消费，
  *   因此必须活过设置它的那个回合的结束，否则技能对其他角色永远不会生效。
  */
 function isCarryOverFlag(flag: string): boolean {
   return flag === buffFlag("next-damage-reduction")
+    || flag === buffFlag("distance-to-self")
     || flag === "silenced"
     || flag.startsWith("delay:");
 }
@@ -118,12 +120,12 @@ function activeSkillFlag(skillId: string): string {
 }
 
 function clearTurnStartFlags(players: readonly DingPlayer[], actorId: PlayerId): DingPlayer[] {
-  const damageReduction = buffFlag("next-damage-reduction");
+  const expiringBuffs = [buffFlag("next-damage-reduction"), buffFlag("distance-to-self")];
   const actor = getPlayer(players, actorId);
-  if (actor.skillFlags[damageReduction] !== true) return [...players];
+  if (!expiringBuffs.some((flag) => actor.skillFlags[flag] === true)) return [...players];
   return replacePlayer(players, actorId, (player) => {
     const skillFlags = { ...player.skillFlags };
-    delete skillFlags[damageReduction];
+    for (const flag of expiringBuffs) delete skillFlags[flag];
     return { ...player, skillFlags };
   });
 }
@@ -151,17 +153,10 @@ function activeSkillTargets(state: DingState, skill: ActiveSkillDefinition): rea
   return [];
 }
 
-function matchesSkillFilter(card: DingCard, filter?: "strike" | "evade" | "trick"): boolean {
-  if (filter === "strike") return card.type === "strike";
-  if (filter === "evade") return card.type === "evade";
-  if (filter === "trick") return card.kind === "trick";
-  return true;
-}
-
 function canPaySkillCost(actor: DingPlayer, skill: ActiveSkillDefinition): boolean {
   if (skill.cost.kind === "none") return true;
   const filter = skill.cost.kind === "discard" ? skill.cost.filter : undefined;
-  return actor.hand.some((card) => matchesSkillFilter(card, filter));
+  return actor.hand.some((card) => matchesActiveSkillCardFilter(card, filter));
 }
 
 /** 在指定触发点结算拥有该技能的角色；一次性技能标记写入该角色的 skillFlags。 */
@@ -552,7 +547,7 @@ export function respondToSkill(
   if (skill.cost.kind === "discard") {
     if (!decision.cardUid) return state;
     const candidate = owner.hand.find((card) => card.id === decision.cardUid);
-    if (!candidate || !matchesSkillFilter(candidate, skill.cost.filter)) return state;
+    if (!candidate || !matchesActiveSkillCardFilter(candidate, skill.cost.filter)) return state;
     costCard = candidate;
   } else if (decision.cardUid !== undefined) return state;
 
@@ -1441,6 +1436,7 @@ function deathReward(target: DingPlayer, killer: DingPlayer | undefined): DeathR
 /** 死亡结算：先处理死者自己的死亡技能，再让存活角色响应 playerDied 触发点。 */
 function runDeathRattle(state: DingState, ownerId: PlayerId, sourceId: PlayerId | undefined): DingState {
   const owner = getPlayer(state.players, ownerId);
+  if (owner.skillFlags["silenced"] === true) return state;
   const hero = heroOf(owner);
   const spec = hero?.triggers?.death;
   if (!spec || spec.effect !== "silence-source" || !sourceId || sourceId === ownerId) return state;
@@ -1521,6 +1517,7 @@ function resolveDeath(state: DingState, targetId: PlayerId, sourceId: PlayerId |
       status: "finished",
       phase: "finished",
       winner,
+      stack: [],
     });
   }
   return settleTrickFrames(witnessed, witnessed.stack);
@@ -1679,15 +1676,35 @@ export function respondToDying(state: DingState, responderId: PlayerId, cardUid?
     });
   }
 
-  const cursor = (pending.cursor + 1) % pending.responders.length;
-  if (cursor === 0) {
-    const death = resolveDeath(
-      { ...state, players, discard, stack: state.stack.slice(0, -1) },
+  // 一张疗元尚不足以救回时，从出牌者开始开启新一轮询问：出牌者可立刻继续
+  // 出疗元；只有在最近一次疗元之后所有响应者都明确放弃，才确认死亡。
+  // 通过旋转响应顺序让当前出牌者成为本轮起点，避免给 PendingDying 增加
+  // 难以持久化的临时计数，也让“全员 pass”拥有明确的终止边界。
+  if (card) {
+    const responders = [
+      ...pending.responders.slice(pending.cursor),
+      ...pending.responders.slice(0, pending.cursor),
+    ];
+    return withAction(state, responderId, texts, {
+      players,
+      discard,
+      stack: [...state.stack.slice(0, -1), { ...pending, offered, responders, cursor: 0 }],
+    });
+  }
+
+  const cursor = pending.cursor + 1;
+  if (cursor >= pending.responders.length) {
+    const passed = withAction(state, responderId, texts, {
+      players,
+      discard,
+      stack: state.stack.slice(0, -1),
+    });
+    return resolveDeath(
+      passed,
       pending.targetId,
       pending.sourceId,
-      state.stack.slice(0, -1),
+      passed.stack,
     );
-    return withAction(death, "table", texts, {});
   }
 
   return withAction(state, responderId, texts, {

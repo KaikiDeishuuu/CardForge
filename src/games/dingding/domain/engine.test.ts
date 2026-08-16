@@ -328,6 +328,20 @@ describe("Ding Ding engine", () => {
     const pending = activateSkill(game, "south", "qianxing");
     const buffed = respondToSkill(pending, "south", { cardUid: "qianxing-cost" });
     expect(distanceBetween(buffed.players, "east", "south")).toBe(3);
+
+    const ownerEnded = endTurn(buffed, "south");
+    expect(ownerEnded.activePlayerId).toBe("east");
+    expect(ownerEnded.players[0].skillFlags["buff:distance-to-self"]).toBe(true);
+    expect(distanceBetween(ownerEnded.players, "east", "south")).toBe(3);
+
+    const otherTurnStarted = advancePhase(ownerEnded);
+    expect(otherTurnStarted.phase).toBe("judge");
+    expect(distanceBetween(otherTurnStarted.players, "east", "south")).toBe(3);
+
+    const ownerNextTurn = state({ phase: "prepare", activePlayerId: "south", turnNumber: 5 }, [...otherTurnStarted.players]);
+    const expired = advancePhase(ownerNextTurn);
+    expect(expired.players[0].skillFlags["buff:distance-to-self"]).toBeUndefined();
+    expect(distanceBetween(expired.players, "east", "south")).toBe(2);
   });
 
   it("uses 突袭 to increase attack range for the turn", () => {
@@ -498,6 +512,34 @@ describe("Ding Ding engine", () => {
     expect(next.players[1].skillFlags.silenced).toBe(true);
     expect(next.log.some((entry) => entry.text.includes("绝弦"))).toBe(true);
     expect(getActiveSkillUse(next, "east")).toBeUndefined();
+  });
+
+  it("does not trigger 乐姬's death skill after she has been silenced", () => {
+    const game = state({ activePlayerId: "east" }, [
+      player("south", { identity: "lord" }),
+      player("east", {
+        identity: "rebel",
+        heroId: "redblade",
+        hand: [card("strike", "strike-0")],
+      }),
+      player("north", {
+        identity: "loyalist",
+        heroId: "yueji",
+        hp: 1,
+        skillFlags: { silenced: true },
+      }),
+      player("west", { identity: "renegade" }),
+    ]);
+    let next = respondToStrike(playCard(game, "east", "strike-0", "north"), "north");
+    while (next.stack.at(-1)?.kind === "dying") {
+      const dying = next.stack.at(-1);
+      if (dying?.kind !== "dying") break;
+      next = respondToDying(next, dying.responders[dying.cursor]);
+    }
+
+    expect(next.players[2].alive).toBe(false);
+    expect(next.players[1].skillFlags.silenced).toBeUndefined();
+    expect(next.log.some((entry) => entry.text.includes("绝弦"))).toBe(false);
   });
 
   it("makes the next strike unavoidable with 破坚", () => {
@@ -734,6 +776,56 @@ describe("Ding Ding engine", () => {
     const saved = respondToDying(hurt, responder!, "salve-0");
     expect(saved.stack).toHaveLength(0);
     expect(saved.players.find((entry) => entry.id === "east")?.hp).toBe(1);
+  });
+
+  it("lets the same responder offer multiple salves for a deep dying target", () => {
+    const game = state({}, [
+      player("south", {
+        hand: [card("strike", "strike-0")],
+        skillFlags: { "buff:next-strike-damage": true },
+      }),
+      player("east", { hp: 1, hand: [card("salve", "salve-0"), card("salve", "salve-1")] }),
+      player("north"),
+      player("west"),
+    ]);
+    const hurt = respondToStrike(playCard(game, "south", "strike-0", "east"), "east");
+    expect(hurt.players[1].hp).toBe(-1);
+    expect(hurt.stack.at(-1)).toMatchObject({ kind: "dying", required: 2, offered: 0 });
+
+    const firstSalve = respondToDying(hurt, "east", "salve-0");
+    expect(firstSalve.players[1].hp).toBe(0);
+    expect(firstSalve.stack.at(-1)).toMatchObject({
+      kind: "dying",
+      offered: 1,
+      cursor: 0,
+      responders: ["east", "north", "west", "south"],
+    });
+
+    const saved = respondToDying(firstSalve, "east", "salve-1");
+    expect(saved.players[1]).toMatchObject({ alive: true, hp: 1 });
+    expect(saved.stack).toHaveLength(0);
+  });
+
+  it("ends a dying pass cycle after everyone declines following the latest salve", () => {
+    const game = state({}, [
+      player("south", {
+        hand: [card("strike", "strike-0")],
+        skillFlags: { "buff:next-strike-damage": true },
+      }),
+      player("east", { hp: 1, hand: [card("salve", "salve-0")] }),
+      player("north"),
+      player("west"),
+    ]);
+    let next = respondToStrike(playCard(game, "south", "strike-0", "east"), "east");
+    next = respondToDying(next, "east", "salve-0");
+
+    for (const responderId of ["east", "north", "west", "south"] as const) {
+      expect(next.stack.at(-1)).toMatchObject({ kind: "dying" });
+      next = respondToDying(next, responderId);
+    }
+
+    expect(next.players[1]).toMatchObject({ alive: false, hp: 0 });
+    expect(next.stack).toHaveLength(0);
   });
 
   it("reveals identity and pays rebel rewards on death", () => {
@@ -1272,6 +1364,30 @@ describe("Ding Ding engine", () => {
     next = respondToHorde(next, "west");
     expect(next.stack).toHaveLength(0);
     expect(next.players[3].hp).toBe(3);
+  });
+
+  it("clears suspended group resolution frames when a death ends the match", () => {
+    const game = state({ activePlayerId: "west" }, [
+      player("south", { identity: "lord", revealed: true, hp: 1 }),
+      player("east", { identity: "renegade" }),
+      player("north", { identity: "loyalist" }),
+      player("west", { identity: "rebel", hand: [card("horde", "horde-0")] }),
+    ]);
+    let next = passAllTrickResponses(playCard(game, "west", "horde-0", "west"));
+    expect(next.stack.at(-1)).toMatchObject({ kind: "horde", responders: ["south", "east", "north"] });
+
+    next = respondToHorde(next, "south");
+    expect(next.stack.at(-1)).toMatchObject({ kind: "dying", targetId: "south" });
+    expect(next.stack.at(-2)).toMatchObject({ kind: "horde", cursor: 1 });
+    while (next.stack.at(-1)?.kind === "dying") {
+      const dying = next.stack.at(-1);
+      if (dying?.kind !== "dying") break;
+      next = respondToDying(next, dying.responders[dying.cursor]);
+    }
+
+    expect(next.status).toBe("finished");
+    expect(next.winner).toBe("rebel");
+    expect(next.stack).toEqual([]);
   });
 
   it("heals every wounded player with grove", () => {

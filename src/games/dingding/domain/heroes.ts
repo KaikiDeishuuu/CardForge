@@ -1,4 +1,4 @@
-import type { DingPlayer } from "./types";
+import type { DingCard, DingPlayer } from "./types";
 
 export type HeroId =
   | "redblade"
@@ -46,14 +46,29 @@ export interface TriggerSpec {
 
 export type ActiveSkillTarget = "self" | "wounded" | "other";
 
+export type ActiveSkillCardFilter = "strike" | "evade" | "trick";
+
 export type ActiveSkillCost =
   | { readonly kind: "none" }
   | {
       readonly kind: "discard";
       readonly count: 1;
       /** 不填表示任意手牌；strike/evade/trick 会过滤可消耗手牌。 */
-      readonly filter?: "strike" | "evade" | "trick";
+      readonly filter?: ActiveSkillCardFilter;
     };
+
+/** 主动技消耗牌的唯一过滤规则，供引擎、AI、存档校验与界面共同使用。 */
+export function matchesActiveSkillCardFilter(
+  card: DingCard,
+  filter?: ActiveSkillCardFilter,
+): boolean {
+  switch (filter) {
+    case undefined: return true;
+    case "strike": return card.type === "strike";
+    case "evade": return card.type === "evade";
+    case "trick": return card.kind === "trick";
+  }
+}
 
 export type ActiveSkillBuff =
   | "next-strike-damage"
@@ -192,13 +207,13 @@ export const HERO_CATALOG: Readonly<Record<HeroId, HeroDefinition>> = {
     title: "踏雾游侠",
     maxHp: 3,
     skillName: "远遁",
-    description: "其他角色计算与你的距离时 +1；出牌阶段可弃一张手牌，本回合该加成额外 +1。",
+    description: "其他角色计算与你的距离时 +1；出牌阶段可弃一张手牌，令该加成额外 +1，持续到你的下个回合开始。",
     distanceToModifier: 1,
     activeSkill: {
       id: "qianxing",
       name: "潜行",
-      description: "出牌阶段限一次，弃置一张手牌，本回合其他角色计算与你的距离额外 +1。",
-      prompt: "选择一张手牌作为消耗，本回合其他角色计算与你的距离额外 +1。",
+      description: "出牌阶段限一次，弃置一张手牌；其他角色计算与你的距离额外 +1，持续到你的下个回合开始。",
+      prompt: "选择一张手牌作为消耗；其他角色计算与你的距离额外 +1，持续到你的下个回合开始。",
       cost: { kind: "discard", count: 1 },
       target: "self",
       effect: { kind: "buff", buff: "distance-to-self" },

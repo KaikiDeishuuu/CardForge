@@ -1,5 +1,5 @@
 import { getActiveSkillUse, getPlayer, getPlayableCards, getTargetOptions, requiredDiscards } from "./engine";
-import { heroOf, type ActiveSkillEffect } from "./heroes";
+import { heroOf, matchesActiveSkillCardFilter, type ActiveSkillEffect } from "./heroes";
 import type { DingAiMove, DingCard, DingDifficulty, DingPlayer, DingState, IdentityId, PendingTrick, PlayerId } from "./types";
 
 export interface DingIdentityBelief {
@@ -21,14 +21,13 @@ function exactBelief(identity: DingPlayer["identity"]): DingIdentityBelief {
 /** 从公开日志中提取的身份信号：护主、援救/援护主君都会被记住。 */
 function actionIdentityClues(state: DingState, targetId: PlayerId): Pick<DingIdentityBelief, "loyalist" | "rebel" | "renegade"> {
   const target = getPlayer(state.players, targetId);
-  const lord = state.players.find((player) => player.identity === "lord");
+  const lord = publicLord(state);
   const clues = { loyalist: 0, rebel: 0, renegade: 0 };
   if (!lord) return clues;
   for (const entry of state.log) {
     if (entry.text.includes(`${target.displayName}弃置`) && entry.text.includes("护主")) clues.loyalist += 1.5;
     if (entry.text.includes(`${target.displayName}用「疗元」援救`) && entry.text.includes(lord.displayName)) clues.loyalist += 0.8;
     if (entry.text.includes(`${target.displayName}的「援护」生效`) && entry.text.includes(`${lord.displayName}回复`)) clues.loyalist += 0.7;
-    if (entry.text.includes(`${target.displayName}的「无懈可击」生效`) && entry.text.includes(lord.displayName)) clues.loyalist += 0.5;
   }
   return clues;
 }
@@ -75,6 +74,51 @@ export function identityBelief(
   return { lord, loyalist: loyalist / total, rebel: rebel / total, renegade: renegade / total };
 }
 
+function publicLord(state: DingState): DingPlayer | undefined {
+  return state.players.find((player) => player.revealed && player.identity === "lord");
+}
+
+/**
+ * 从观察者视角衡量另一名角色是否是盟友。隐藏身份只通过公开行动形成的
+ * identityBelief 参与计算，绝不直接读取目标的 identity。
+ */
+function allyConfidence(state: DingState, observerId: PlayerId, targetId: PlayerId): number {
+  if (observerId === targetId) return 4;
+  const observer = getPlayer(state.players, observerId);
+  const target = getPlayer(state.players, targetId);
+  const publicIdentity = target.revealed ? target.identity : undefined;
+
+  if (observer.identity === "lord" || observer.identity === "loyalist") {
+    if (publicIdentity === "lord") return 3;
+    if (publicIdentity === "loyalist") return 2;
+    if (publicIdentity) return -3;
+    const belief = identityBelief(state, observerId, targetId);
+    return belief.loyalist - belief.rebel - belief.renegade;
+  }
+
+  if (observer.identity === "rebel") {
+    // 四席身份各一，叛锋没有同阵营角色；除了自己以外不存在可援助的盟友。
+    return -3;
+  }
+
+  // 流谋没有盟友；对主君的阶段性保护在具体的濒死/锦囊决策中处理。
+  return -2;
+}
+
+function helpfulTarget(
+  state: DingState,
+  actorId: PlayerId,
+  options: readonly PlayerId[],
+): PlayerId | undefined {
+  return options
+    .map((id) => ({ id, confidence: allyConfidence(state, actorId, id) }))
+    .filter(({ confidence }) => confidence > 0)
+    .sort((left, right) => right.confidence - left.confidence
+      || getPlayer(state.players, left.id).hp - getPlayer(state.players, right.id).hp
+      || getPlayer(state.players, left.id).hand.length - getPlayer(state.players, right.id).hand.length
+      || left.id.localeCompare(right.id))[0]?.id;
+}
+
 function threatScore(state: DingState, observerId: PlayerId, targetId: PlayerId): number {
   const belief = identityBelief(state, observerId, targetId);
   const observer = getPlayer(state.players, observerId);
@@ -83,22 +127,28 @@ function threatScore(state: DingState, observerId: PlayerId, targetId: PlayerId)
     return belief.rebel + belief.renegade - belief.loyalist;
   }
   if (observer.identity === "rebel") {
-    if (target.revealed && target.identity === "lord") return 10;
+    if (target.revealed && target.identity === "lord") return Number.POSITIVE_INFINITY;
     return target.hp + target.hand.length;
   }
   // 流谋的目标顺序：先减少其他非主君存活者，再在只剩主君时收掉主君。
-  const lord = state.players.find((player) => player.identity === "lord");
+  const lord = publicLord(state);
   const otherLiving = state.players.filter((player) => player.alive && player.id !== observer.id);
   const nonLordLiving = otherLiving.filter((player) => player.id !== lord?.id);
   if (target.revealed && target.identity === "lord") {
-    return nonLordLiving.length <= 1 ? 10 : -10;
+    return nonLordLiving.length === 0 ? 10 : -10;
   }
-  if (nonLordLiving.length <= 1) return -target.hp;
+  if (nonLordLiving.length === 0) return -target.hp;
   return -target.hp - target.hand.length;
 }
 
 function tacticalTarget(state: DingState, actorId: PlayerId, options: readonly PlayerId[]): PlayerId | undefined {
+  const actor = getPlayer(state.players, actorId);
+  const lord = publicLord(state);
+  const otherNonLordAlive = actor.identity === "renegade" && lord
+    ? state.players.some((player) => player.alive && player.id !== actorId && player.id !== lord.id)
+    : false;
   return options
+    .filter((id) => !(otherNonLordAlive && id === lord?.id))
     .map((id) => ({ id, score: threatScore(state, actorId, id) }))
     .sort((left, right) => right.score - left.score
       || getPlayer(state.players, left.id).hp - getPlayer(state.players, right.id).hp
@@ -111,13 +161,8 @@ function chooseAiSkillTarget(
   targetIds: readonly PlayerId[],
   effectKind: ActiveSkillEffect["kind"],
 ): PlayerId | undefined {
-  const actor = getPlayer(state.players, actorId);
-  const lord = state.players.find((player) => player.identity === "lord");
   if (effectKind === "draw-target") {
-    if ((actor.identity === "lord" || actor.identity === "loyalist") && lord && targetIds.includes(lord.id)) return lord.id;
-    return targetIds
-      .map((id) => getPlayer(state.players, id))
-      .sort((left, right) => left.hp - right.hp || left.hand.length - right.hand.length || left.seat - right.seat)[0]?.id;
+    return helpfulTarget(state, actorId, targetIds);
   }
   return tacticalTarget(state, actorId, targetIds);
 }
@@ -215,20 +260,18 @@ export function chooseAiMove(
   const skillUse = getActiveSkillUse(state, actorId);
   if (skillUse) {
     const { skill } = skillUse;
-    if (difficulty === "relaxed") {
-      if (skill.cost.kind === "none") return { kind: "skill", skillId: skill.id };
-      if (skill.target === "wounded" && actor.hp < actor.maxHp) return { kind: "skill", skillId: skill.id };
-    } else if (skill.target === "wounded") {
-      const lord = state.players.find((player) => player.identity === "lord");
-      const canHelpLord = actor.identity === "lord" || actor.identity === "loyalist";
-      const selfWounded = actor.hp < actor.maxHp;
-      const lordWounded = Boolean(lord?.alive && lord.hp < lord.maxHp);
-      if (selfWounded || (canHelpLord && lordWounded)) {
+    if (skill.target === "wounded") {
+      const targetId = helpfulTarget(state, actorId, skillUse.targetIds);
+      if (targetId && (difficulty !== "relaxed" || skill.cost.kind === "none" || targetId === actorId)) {
         return { kind: "skill", skillId: skill.id };
       }
     } else if (skill.target === "other") {
       const targetId = chooseAiSkillTarget(state, actorId, skillUse.targetIds, skill.effect.kind);
-      if (targetId) return { kind: "skill", skillId: skill.id };
+      if (targetId && (difficulty !== "relaxed" || skill.cost.kind === "none")) {
+        return { kind: "skill", skillId: skill.id };
+      }
+    } else if (difficulty === "relaxed") {
+      if (skill.cost.kind === "none") return { kind: "skill", skillId: skill.id };
     } else if (skill.cost.kind === "none") {
       return { kind: "skill", skillId: skill.id };
     } else if (skill.effect.kind === "draw" || skill.effect.kind === "draw-discard") {
@@ -255,13 +298,7 @@ export function chooseAiMove(
   const aid = playable.find((card) => card.type === "aid");
   if (aid) {
     const options = getTargetOptions(state, actorId, aid);
-    const lord = state.players.find((player) => player.identity === "lord");
-    const canHelpLord = actor.identity === "lord" || actor.identity === "loyalist";
-    const targetId = options.includes(actor.id)
-      ? actor.id
-      : canHelpLord && lord && options.includes(lord.id)
-        ? lord.id
-        : options[0];
+    const targetId = helpfulTarget(state, actorId, options);
     if (targetId) return { kind: "play", cardUid: aid.id, targetId };
   }
 
@@ -270,7 +307,7 @@ export function chooseAiMove(
 
   const grove = playable.find((card) => card.type === "grove");
   if (grove) {
-    const lord = state.players.find((player) => player.identity === "lord");
+    const lord = publicLord(state);
     const canHelpLord = actor.identity === "lord" || actor.identity === "loyalist";
     const lordWounded = Boolean(lord?.alive && lord.hp < lord.maxHp);
     if (actor.hp < actor.maxHp || (canHelpLord && lordWounded)) {
@@ -289,8 +326,8 @@ export function chooseAiMove(
       : options
         .map((id) => ({ id, belief: identityBelief(state, actorId, id) }))
         .sort((left, right) =>
-          Math.max(left.belief.loyalist, left.belief.rebel, left.belief.renegade)
-          - Math.max(right.belief.loyalist, right.belief.rebel, right.belief.renegade)
+          Math.max(right.belief.loyalist, right.belief.rebel, right.belief.renegade)
+          - Math.max(left.belief.loyalist, left.belief.rebel, left.belief.renegade)
           || left.id.localeCompare(right.id),
         )[0]?.id;
     if (targetId) return { kind: "play", cardUid: probe.id, targetId };
@@ -312,7 +349,10 @@ export function chooseAiMove(
   // 叛锋与流谋更愿意把局面搅乱；主君方不使用无差别群体牌。
   if (actor.identity === "rebel" || actor.identity === "renegade") {
     const othersAlive = state.players.filter((player) => player.id !== actor.id && player.alive);
-    if (othersAlive.length >= 2) {
+    const lord = actor.identity === "renegade" ? publicLord(state) : undefined;
+    const wouldEndForRebels = Boolean(lord && lord.hp <= 1
+      && othersAlive.some((player) => player.id !== lord.id));
+    if (othersAlive.length >= 2 && !wouldEndForRebels) {
       const horde = playable.find((card) => card.type === "horde");
       if (horde) return { kind: "play", cardUid: horde.id, targetId: actor.id };
       const volley = playable.find((card) => card.type === "volley");
@@ -374,8 +414,25 @@ export function chooseAiStrikeResponse(
 }
 
 export function chooseAiDyingResponse(state: DingState, responderId: PlayerId): string | undefined {
+  const pending = state.stack.at(-1);
+  if (!pending || pending.kind !== "dying" || pending.responders[pending.cursor] !== responderId) return undefined;
   const responder = getPlayer(state.players, responderId);
-  return responder.hand.find((card) => card.type === "salve")?.id;
+  const salve = responder.hand.find((card) => card.type === "salve");
+  if (!salve) return undefined;
+  if (pending.targetId === responderId) return salve.id;
+
+  const target = getPlayer(state.players, pending.targetId);
+  if (responder.identity === "renegade") {
+    const lord = publicLord(state);
+    if (target.id !== lord?.id) return undefined;
+    // 主君过早退场会令叛锋立即获胜；只剩流谋与主君时则应让主君倒下。
+    const thirdPartyAlive = state.players.some((player) =>
+      player.alive && player.id !== responderId && player.id !== target.id,
+    );
+    return thirdPartyAlive ? salve.id : undefined;
+  }
+
+  return allyConfidence(state, responderId, target.id) > 0 ? salve.id : undefined;
 }
 
 export function chooseAiDuelResponse(
@@ -465,12 +522,7 @@ export function chooseAiSkillDecision(
   const chooseCost = () => {
     if (skill.cost.kind === "none") return undefined;
     const filter = skill.cost.kind === "discard" ? skill.cost.filter : undefined;
-    return sortForDiscard(owner.hand.filter((card) => {
-      if (filter === "strike") return card.type === "strike";
-      if (filter === "evade") return card.type === "evade";
-      if (filter === "trick") return card.kind === "trick";
-      return true;
-    }))[0];
+    return sortForDiscard(owner.hand.filter((card) => matchesActiveSkillCardFilter(card, filter)))[0];
   };
 
   if (skill.target === "self") {
@@ -490,21 +542,87 @@ export function chooseAiSkillDecision(
     return targetId ? { cardUid: costCard?.id, targetId } : undefined;
   }
 
-  const lord = state.players.find((player) => player.identity === "lord");
-  if ((owner.identity === "lord" || owner.identity === "loyalist")
-    && lord && targetIds.includes(lord.id)) {
-    return { cardUid: costCard?.id, targetId: lord.id };
+  const targetId = helpfulTarget(state, owner.id, targetIds);
+  return targetId ? { cardUid: costCard?.id, targetId } : undefined;
+}
+
+function effectRelationScore(state: DingState, observerId: PlayerId, targetId: PlayerId): number {
+  const observer = getPlayer(state.players, observerId);
+  const target = getPlayer(state.players, targetId);
+  const lord = publicLord(state);
+  if (observer.identity === "renegade" && target.id === lord?.id) {
+    const thirdPartyAlive = state.players.some((player) =>
+      player.alive && player.id !== observerId && player.id !== targetId,
+    );
+    return thirdPartyAlive ? 1 : -2;
+  }
+  return allyConfidence(state, observerId, targetId);
+}
+
+const BENEFICIAL_TRICKS: ReadonlySet<PendingTrick["cardType"]> = new Set(["focus", "grove", "aid"]);
+const TERMINAL_TRICK_VALUE = 100;
+
+/** 正数表示希望锦囊生效，负数表示希望它被无懈抵消。 */
+function trickValue(
+  state: DingState,
+  observerId: PlayerId,
+  frame: PendingTrick,
+  visited: ReadonlySet<number> = new Set(),
+): number {
+  if (visited.has(frame.frameId)) return 0;
+  const nextVisited = new Set(visited).add(frame.frameId);
+  if (frame.cardType === "nullify") {
+    const target = state.stack.find((entry) =>
+      entry.kind === "trick" && entry.frameId === frame.counterFrameId,
+    );
+    return target?.kind === "trick" ? -trickValue(state, observerId, target, nextVisited) : 0;
   }
 
-  const target = targetIds
-    .map((id) => getPlayer(state.players, id))
-    .sort((left, right) => left.hp - right.hp || left.hand.length - right.hand.length || left.seat - right.seat)[0];
-  return target ? { cardUid: costCard?.id, targetId: target.id } : undefined;
+  if (frame.cardType === "horde" || frame.cardType === "volley") {
+    const observer = getPlayer(state.players, observerId);
+    const lord = publicLord(state);
+    const wouldDefeatLord = Boolean(lord?.alive && lord.hp <= 1 && frame.actorId !== lord.id);
+    if (wouldDefeatLord && observer.identity === "rebel") return TERMINAL_TRICK_VALUE;
+    if (wouldDefeatLord && observer.identity === "renegade" && lord) {
+      const thirdPartyAlive = state.players.some((player) =>
+        player.alive && player.id !== observerId && player.id !== lord.id,
+      );
+      return thirdPartyAlive ? -TERMINAL_TRICK_VALUE : TERMINAL_TRICK_VALUE;
+    }
+  }
+
+  // 聚势、同袍和援护是主动施放的收益牌，使用者不会反过来抵消自己。
+  if (frame.actorId === observerId && BENEFICIAL_TRICKS.has(frame.cardType)) return 5;
+
+  const actorValue = effectRelationScore(state, observerId, frame.actorId);
+  if (frame.cardType === "focus") return actorValue;
+  if (frame.cardType === "aid") {
+    return frame.targetId ? effectRelationScore(state, observerId, frame.targetId) : actorValue;
+  }
+  if (frame.cardType === "grove") {
+    return state.players
+      .filter((player) => player.alive && player.hp < player.maxHp)
+      .reduce((total, player) => total + effectRelationScore(state, observerId, player.id), 0);
+  }
+  if (frame.cardType === "probe") {
+    const targetValue = frame.targetId ? effectRelationScore(state, observerId, frame.targetId) : 0;
+    return actorValue - targetValue;
+  }
+  if (frame.cardType === "horde" || frame.cardType === "volley") {
+    const exposedValue = state.players
+      .filter((player) => player.alive && player.id !== frame.actorId)
+      .reduce((total, player) => total + effectRelationScore(state, observerId, player.id), 0);
+    return actorValue - exposedValue;
+  }
+  if (frame.targetId) {
+    return actorValue - effectRelationScore(state, observerId, frame.targetId);
+  }
+  return 0;
 }
 
 /**
- * M1 AI 的无懈可击决策仍然只使用公开信息：自己的身份、公开的主君、
- * 以及锦囊是否指向自己。它保护自己的锦囊与目标，也按阵营保护/干扰公开主君。
+ * 无懈可击按锦囊对自己的公开阵营收益判断；反制链会递归翻转原锦囊的
+ * 收益，因此既不会抵消友方援护，也会保护被敌方无懈命中的有益牌。
  */
 export function chooseAiNullifyResponse(
   state: DingState,
@@ -512,37 +630,14 @@ export function chooseAiNullifyResponse(
   difficulty: DingDifficulty = state.difficulty,
 ): string | undefined {
   const top = topTrickFrame(state);
-  if (!top || !top.awaitingResponse) return undefined;
+  if (!top || !top.awaitingResponse || top.responders[top.cursor] !== responderId) return undefined;
   const responder = getPlayer(state.players, responderId);
   const nullify = responder.hand.find((card) => card.type === "nullify");
   if (!nullify) return undefined;
 
+  if (trickValue(state, responderId, top) >= 0) return undefined;
   if (difficulty === "relaxed" && top.cardType !== "nullify" && top.targetId !== responderId) return undefined;
-
-  if (top.cardType === "nullify") {
-    const target = state.stack.find((entry) => entry.kind === "trick" && entry.frameId === top.counterFrameId);
-    if (!target || target.kind !== "trick") return undefined;
-    // 反制链：只保护自己使用的锦囊；别人抵消落向自己的牌是好事，不必反制。
-    return target.actorId === responderId ? nullify.id : undefined;
-  }
-
-  // 指向自己的拆解/牵袭/约斗：直接抵消。
-  if (top.targetId === responderId) return nullify.id;
-
-  if (top.cardType === "focus") {
-    const actor = getPlayer(state.players, top.actorId);
-    if (actor.revealed && actor.identity === "lord" && (responder.identity === "rebel" || responder.identity === "renegade")) {
-      return nullify.id;
-    }
-    return undefined;
-  }
-
-  // 主君方保护公开主君；叛锋/流谋不替主君挡指向性锦囊。
-  if (responder.identity === "loyalist" || responder.identity === "lord") {
-    const target = top.targetId ? getPlayer(state.players, top.targetId) : undefined;
-    if (target?.revealed && target.identity === "lord") return nullify.id;
-  }
-  return undefined;
+  return nullify.id;
 }
 
 export function chooseAiDiscards(state: DingState, actorId: PlayerId): string[] {

@@ -28,6 +28,12 @@ const COMBO_TYPES = new Set(["single", "pair", "triple", "full-house", "straight
 const ACTION_TYPES = new Set(["deal", "play", "pass", "clear", "finish", "settle", "settings"]);
 const DECK = createDeck();
 const CARD_BY_ID = new Map(DECK.map((card) => [card.id, card]));
+const PLAYER_METADATA: Readonly<Record<PlayerId, Pick<GuandanPlayer, "displayName" | "controller" | "team">>> = {
+  human: { displayName: "你", controller: "human", team: "vermillion" },
+  east: { displayName: "东座", controller: "ai", team: "indigo" },
+  partner: { displayName: "对家", controller: "ai", team: "vermillion" },
+  west: { displayName: "西座", controller: "ai", team: "indigo" },
+};
 
 function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -54,16 +60,13 @@ function isCard(value: unknown): value is GuandanCard {
 function isPlayer(value: unknown): value is GuandanPlayer {
   if (!isRecord(value)
     || typeof value.id !== "string" || !PLAYER_ORDER.includes(value.id as PlayerId)
-    || typeof value.displayName !== "string"
-    || (value.controller !== "human" && value.controller !== "ai" && value.controller !== "remote")
-    || typeof value.team !== "string" || !TEAMS.has(value.team as TeamId)
     || !Array.isArray(value.hand) || !value.hand.every(isCard)
     || (value.finishedPlace !== undefined && !isPositiveInteger(value.finishedPlace))) return false;
 
-  if (value.id === "human") return value.controller === "human" && value.team === "vermillion";
-  if (value.controller === "human") return false;
-  const expectedTeam: TeamId = value.id === "partner" ? "vermillion" : "indigo";
-  return value.team === expectedTeam;
+  const expected = PLAYER_METADATA[value.id as PlayerId];
+  return value.displayName === expected.displayName
+    && value.controller === expected.controller
+    && value.team === expected.team;
 }
 
 function isCombo(value: unknown, levelRank: NumberRank): value is CardCombo {
@@ -158,7 +161,7 @@ function restoreV1(data: unknown): GuandanState | undefined {
   if (!Array.isArray(data.players) || data.players.length !== 4 || !data.players.every(isPlayer)) return undefined;
   const players = data.players as unknown as GuandanPlayer[];
   const playerIds = players.map((player) => player.id);
-  if (new Set(playerIds).size !== 4 || !PLAYER_ORDER.every((id) => playerIds.includes(id))) return undefined;
+  if (new Set(playerIds).size !== 4 || !PLAYER_ORDER.every((id, index) => playerIds[index] === id)) return undefined;
   if (!isHandCardsUnique(players)) return undefined;
   if (!Array.isArray(data.finishOrder) || !validateFinishOrder(players, data.finishOrder)) return undefined;
   if (!isMatch(data.match)) return undefined;

@@ -41,7 +41,7 @@ import {
   chooseAiVolleyResponse,
 } from "./domain/ai";
 import { IDENTITY_NAMES, WINNER_COPY } from "./domain/data";
-import { HERO_CATALOG, type HeroId } from "./domain/heroes";
+import { HERO_CATALOG, matchesActiveSkillCardFilter, type HeroId } from "./domain/heroes";
 import { DING_SAVE_SCHEMA_VERSION, restoreDingRootState, serializeDingRootState } from "./domain/persistence";
 import {
   chooseDingMatchHero,
@@ -133,7 +133,7 @@ function DingHeroDraft({ options, onChoose, onExit }: {
       <article className="ding-draft">
         <small>DING HERO DRAFT</small>
         <h2 id="ding-draft-title">三选一 · 选择武将</h2>
-        <p>身份仍然随机分配。三名 AI 会从其余六名武将中补位，未展示的武将本局不会出现。</p>
+        <p>身份仍然随机分配。三名 AI 会从其余武将中各自补位，四席武将互不重复。</p>
         <div className="ding-draft__heroes">
           {options.map((heroId) => {
             const hero = HERO_CATALOG[heroId];
@@ -300,13 +300,26 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
   const pendingSkillOwner = pendingSkill
     ? state.players.find((player) => player.id === pendingSkill.ownerId)
     : undefined;
-  const pendingSkillDefinition = pendingSkillOwner
+  const pendingHeroSkill = pendingSkillOwner
     ? HERO_CATALOG[pendingSkillOwner.heroId as HeroId]?.activeSkill
     : undefined;
+  const pendingSkillDefinition = pendingHeroSkill?.id === pendingSkill?.skillId
+    ? pendingHeroSkill
+    : undefined;
   const pendingSkillNeedsCost = pendingSkillDefinition?.cost.kind === "discard";
+  const pendingSkillCostFilter = pendingSkillDefinition?.cost.kind === "discard"
+    ? pendingSkillDefinition.cost.filter
+    : undefined;
+  const pendingSkillCostCards = human.hand.filter((card) =>
+    matchesActiveSkillCardFilter(card, pendingSkillCostFilter));
   const pendingSkillNeedsTarget = pendingSkillDefinition ? pendingSkillDefinition.target !== "self" : false;
-  const pendingSkillConfirmReady = (!pendingSkillNeedsCost || Boolean(skillCostUid))
-    && (!pendingSkillNeedsTarget || Boolean(skillTargetId));
+  const pendingSkillCostValid = !pendingSkillNeedsCost
+    || pendingSkillCostCards.some((card) => card.id === skillCostUid);
+  const pendingSkillTargetValid = !pendingSkillNeedsTarget
+    || Boolean(skillTargetId && pendingSkill?.targetIds.includes(skillTargetId));
+  const pendingSkillConfirmReady = Boolean(pendingSkillDefinition)
+    && pendingSkillCostValid
+    && pendingSkillTargetValid;
   const pendingTrick = stackTop?.kind === "trick" ? stackTop : undefined;
   const pendingDuel = stackTop?.kind === "duel" ? stackTop : undefined;
   const pendingHorde = stackTop?.kind === "horde" ? stackTop : undefined;
@@ -730,7 +743,7 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
                   <div className="ding-skill-cost" aria-label="选择消耗手牌">
                     <small>选择一张手牌作为消耗</small>
                     <div>
-                      {human.hand.map((card) => (
+                      {pendingSkillCostCards.map((card) => (
                         <button
                           key={card.id}
                           type="button"
@@ -738,7 +751,6 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
                           style={{ "--card-tone": card.tone } as CSSProperties}
                           onClick={() => {
                             setSkillCostUid(skillCostUid === card.id ? undefined : card.id);
-                            setSkillTargetId(undefined);
                             playSound("tap");
                           }}
                           aria-pressed={skillCostUid === card.id}
@@ -785,10 +797,9 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
                   type="button"
                   disabled={!pendingSkillConfirmReady}
                   onClick={() => {
+                    if (!pendingSkillConfirmReady) return;
                     const cardUid = pendingSkillNeedsCost ? skillCostUid : undefined;
                     const targetId = pendingSkillNeedsTarget ? skillTargetId : undefined;
-                    if (pendingSkillNeedsCost && !cardUid) return;
-                    if (pendingSkillNeedsTarget && !targetId) return;
                     transition((current) => respondToSkill(current, human.id, { cardUid, targetId }));
                     setSkillCostUid(undefined);
                     setSkillTargetId(undefined);
@@ -1119,11 +1130,11 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
           <article className="ding-rules">
             <button type="button" className="ding-rules__close" onClick={() => setShowRules(false)} aria-label="关闭规则">×</button>
             <span className="ding-rules__ribbon">身份局</span>
-            <small>TABLE 004 · M3 武将主动技</small>
+            <small>TABLE 004 · M5 身份体验</small>
             <h2 id="ding-rules-title">四席暗局，<br />先明主君，再定鼎。</h2>
             <p>主君身份公开并多 1 点体力；其余三人身份隐藏。主君与辅臣要清剿叛锋与流谋；叛锋要在主君倒下时达阵；流谋必须成为主君倒下时唯一的其他存活者。</p>
             <div className="ding-rules__grid">
-              <span><b>回合</b>准备 → 摸 2 张 → 出牌 → 弃牌到手牌上限（等于当前体力）</span>
+              <span><b>回合</b>准备 → 判定 → 摸 2 张 → 出牌 → 弃牌到手牌上限（等于当前体力）</span>
               <span><b>刺击</b>攻击范围内每回合一次；目标可出「闪避」</span>
               <span><b>疗元</b>受伤时自疗，或在任何人濒死时救援</span>
               <span><b>锦囊</b>聚势/拆解/牵袭/约斗/合围/齐射/同袍/刺探先询问「无懈可击」，再进结算栈；拆解与牵袭可作用于手牌、装备或判定区</span>
@@ -1138,7 +1149,7 @@ export function DingDingGame({ onExit, persistence }: GameRuntimeProps) {
               <span><b>护主</b>主君被刺击且未闪避时，存活辅臣可自选是否弃 1 张手牌抵挡 1 点伤害；弃牌会公开辅臣身份</span>
               <span><b>过载</b>第 24 轮起，每跨过一整轮对存活角色造成递增真实伤害，但不会致死</span>
             </div>
-            <p className="ding-rules__scope">M4 在 M3 基础上加入辅臣护主与第 24 轮起的牌局过载；见习/标准/战术三档 AI 与身份信念也已启用。</p>
+            <p className="ding-rules__scope">M5 已加入三选一选将、身份与武将战绩、结算栈复盘；辅臣护主、牌局过载及三档身份 AI 同时启用。</p>
             <div className="ding-difficulty" role="radiogroup" aria-label="对手难度">
               <small>对手 AI 难度 · 对当前及后续牌局生效</small>
               <div>

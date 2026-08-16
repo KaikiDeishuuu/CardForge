@@ -340,6 +340,60 @@ test("掼蛋支持键盘浏览、提示与出牌", async ({ page }) => {
   await page.keyboard.press("ArrowRight");
   await expect(cards.nth(1)).toBeFocused();
 
+  // 选中牌应抬起但继续遵循从左到右的自然叠放：右邻仍在交叠区上层，
+  // 同时双排布局要为抬升完整预留空间。
+  const selected = cards.nth(1);
+  const rightNeighbor = cards.nth(2);
+  await page.keyboard.press("Space");
+  await expect(selected).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(async () => {
+    const selectedBox = await selected.boundingBox();
+    const neighborBox = await rightNeighbor.boundingBox();
+    return selectedBox && neighborBox ? neighborBox.y - selectedBox.y : 0;
+  }).toBeGreaterThanOrEqual(7);
+
+  const handRows = hand.locator(".gd-hand-rows");
+  const selectedBox = await selected.boundingBox();
+  const handRowsBox = await handRows.boundingBox();
+  expect(selectedBox).not.toBeNull();
+  expect(handRowsBox).not.toBeNull();
+  expect(selectedBox!.y, "选中牌顶部不应被手牌容器裁掉").toBeGreaterThanOrEqual(handRowsBox!.y - 1);
+
+  const naturalStacking = await rightNeighbor.evaluate((element) => {
+    const neighbor = element as HTMLElement;
+    const previous = neighbor.previousElementSibling as HTMLElement | null;
+    if (!previous) return false;
+    const previousRect = previous.getBoundingClientRect();
+    const neighborRect = neighbor.getBoundingClientRect();
+    const overlapTop = Math.max(previousRect.top, neighborRect.top);
+    const overlapBottom = Math.min(previousRect.bottom, neighborRect.bottom);
+    const overlapLeft = Math.max(previousRect.left, neighborRect.left);
+    const overlapRight = Math.min(previousRect.right, neighborRect.right);
+    if (overlapBottom <= overlapTop || overlapRight <= overlapLeft) return false;
+    const hit = document.elementFromPoint(
+      (overlapLeft + overlapRight) / 2,
+      (overlapTop + overlapBottom) / 2,
+    );
+    return hit?.closest("button.gd-card") === neighbor;
+  });
+  expect(naturalStacking, "右邻牌应覆盖交叠区，保持牌点和点击区域可用").toBe(true);
+
+  const rows = hand.locator(".gd-hand-row");
+  const firstRowCardBox = await rows.nth(0).locator("button.gd-card").first().boundingBox();
+  const secondRowCardBox = await rows.nth(1).locator("button.gd-card").first().boundingBox();
+  expect(firstRowCardBox).not.toBeNull();
+  expect(secondRowCardBox).not.toBeNull();
+  if (secondRowCardBox!.y > firstRowCardBox!.y + 1) {
+    expect(secondRowCardBox!.y, "第二行手牌不应侵入第一行").toBeGreaterThanOrEqual(
+      firstRowCardBox!.y + firstRowCardBox!.height - 1,
+    );
+    await page.keyboard.press("ArrowDown");
+    await expect(rows.nth(1).locator("button.gd-card:focus")).toHaveCount(1);
+  } else {
+    await page.keyboard.press("ArrowDown");
+    await expect(selected).toBeFocused();
+  }
+
   await page.getByRole("button", { name: "提示" }).click();
   await expect(hand.locator('button.gd-card[aria-pressed="true"]').first()).toBeVisible();
   const play = page.getByRole("button", { name: /出牌/ });
@@ -347,6 +401,12 @@ test("掼蛋支持键盘浏览、提示与出牌", async ({ page }) => {
   const initialCount = await cards.count();
   await play.click();
   await expect.poll(() => cards.count()).toBeLessThan(initialCount);
+  const trick = page.locator(".gd-trick");
+  await expect(trick).toHaveAttribute("aria-busy", "true");
+  await expect(trick).toContainText(/正在理牌/);
+  const activeSeat = await page.locator(".gd-turn-flag span").textContent();
+  await page.waitForTimeout(350);
+  await expect(page.locator(".gd-turn-flag span")).toHaveText(activeSeat ?? "");
   assertNoPageErrors();
 });
 

@@ -74,8 +74,9 @@ function CardFace({
     <>
       <span className="gd-card__rank">{rank}</span>
       <span className="gd-card__suit" aria-hidden="true">{symbol}</span>
+      <span className="gd-card__pip" aria-hidden="true">{symbol}</span>
       {wild && <span className="gd-card__wild">配</span>}
-      <i className={`gd-card__deck-dot gd-card__deck-dot--${deckIndex}`} />
+      <i className={`gd-card__deck-dot gd-card__deck-dot--${deckIndex}`} aria-hidden="true" />
     </>
   );
 }

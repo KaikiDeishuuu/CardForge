@@ -1,6 +1,6 @@
 import { CARD_CATALOG, SEAT_ORDER, buildDeck } from "./data";
-import { evaluateWinner } from "./engine";
-import { HERO_IDS, heroOf } from "./heroes";
+import { evaluateWinner, LORD_BONUS_HP } from "./engine";
+import { HERO_CATALOG, HERO_IDS, heroOf, matchesActiveSkillCardFilter, type HeroId } from "./heroes";
 import {
   createDefaultDingRootState,
   startDingMatch,
@@ -21,10 +21,11 @@ import type {
 } from "./types";
 
 /**
- * v8：存档从单局 DingState 升级为长期档案 + 活动牌局（DingRootState），
- * 开始记录身份/武将胜率；v7 单局存档可无损迁移，更早版本按不可读处理。
+ * v9：收紧牌面元数据、状态/阶段、武将体力与濒死帧不变量。
+ * v8 root 会迁移长期档案，并为后来加入的武将补零；无法安全恢复的活动局
+ * 会被丢弃而不影响有效档案。v7 单局存档仍按当前规则尽力迁移。
  */
-export const DING_SAVE_SCHEMA_VERSION = 8;
+export const DING_SAVE_SCHEMA_VERSION = 9;
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -83,10 +84,15 @@ function isCard(value: unknown): value is DingCard {
   const id = value.id;
   const definition = Object.values(CARD_CATALOG).find((entry) =>
     id === entry.id || id.startsWith(`${entry.id}-`));
-  if (!definition || definition.kind !== value.kind || definition.type !== value.type) return false;
-  if (value.range !== undefined && !isPositiveInteger(value.range)) return false;
-  if (value.unlimitedStrikes !== undefined && typeof value.unlimitedStrikes !== "boolean") return false;
-  return true;
+  if (!definition) return false;
+  return value.name === definition.name
+    && value.kind === definition.kind
+    && value.type === definition.type
+    && value.symbol === definition.symbol
+    && value.tone === definition.tone
+    && value.description === definition.description
+    && value.range === definition.range
+    && value.unlimitedStrikes === definition.unlimitedStrikes;
 }
 
 function isCardList(value: unknown): value is readonly DingCard[] {
@@ -130,7 +136,7 @@ function isPlayer(value: unknown): value is DingPlayer {
     || !isNonNegativeInteger(value.seat) || value.seat >= 4
     || typeof value.identity !== "string" || !IDENTITIES.has(value.identity)
     || typeof value.revealed !== "boolean"
-    || typeof value.hp !== "number" || !Number.isInteger(value.hp)
+    || typeof value.hp !== "number" || !Number.isSafeInteger(value.hp)
     || !isPositiveInteger(value.maxHp)
     || typeof value.alive !== "boolean"
     || !isCardList(value.hand)
@@ -138,9 +144,7 @@ function isPlayer(value: unknown): value is DingPlayer {
     || typeof value.heroId !== "string" || !HERO_IDS.includes(value.heroId as typeof HERO_IDS[number])
     || !isRecord(value.skillFlags)
     || Object.values(value.skillFlags).some((flag) => typeof flag !== "boolean")) return false;
-  const player = value as unknown as DingPlayer;
-  if (player.alive) return player.hp <= player.maxHp;
-  return player.hp === 0 && player.revealed;
+  return true;
 }
 
 function isLogEntry(value: unknown): boolean {
@@ -296,12 +300,7 @@ function validateStack(data: UnknownRecord, discard: readonly DingCard[]): boole
       } else if (frame.targetIds.length !== 0) return false;
       if (skill.cost.kind === "discard") {
         const filter = skill.cost.filter;
-        const payable = owner.hand.some((card) => {
-          if (filter === "strike") return card.type === "strike";
-          if (filter === "evade") return card.type === "evade";
-          if (filter === "trick") return card.kind === "trick";
-          return true;
-        });
+        const payable = owner.hand.some((card) => matchesActiveSkillCardFilter(card, filter));
         if (!payable) return false;
       }
     } else if (frame.kind === "duel") {
@@ -358,6 +357,7 @@ function validateState(data: unknown): data is DingState {
     || !isNonNegativeInteger(data.rngSeed) || data.rngSeed > 0xffff_ffff) return false;
 
   const players = data.players as unknown as DingPlayer[];
+  const stack = data.stack as unknown as readonly ResolutionFrame[];
   const ids = players.map((player) => player.id);
   if (new Set(ids).size !== 4 || !SEAT_ORDER.every((id) => ids.includes(id))) return false;
   // 座位号必须与 SEAT_ORDER 的位置语义一致；只检查 0–3 会放过交换过的座位。
@@ -365,8 +365,27 @@ function validateState(data: unknown): data is DingState {
   if (players.filter((player) => player.controller === "human").length !== 1) return false;
   if (new Set(players.map((player) => player.identity)).size !== IDENTITIES.size) return false;
   if (new Set(players.map((player) => player.heroId)).size !== players.length) return false;
+  if ((data.status === "finished") !== (data.phase === "finished")) return false;
+
+  const top = stack.at(-1);
+  const pendingDying = top?.kind === "dying" ? top : undefined;
   for (const player of players) {
     if (player.identity === "lord" && !player.revealed) return false;
+    const hero = HERO_CATALOG[player.heroId as HeroId];
+    const expectedMaxHp = hero.maxHp + (player.identity === "lord" ? LORD_BONUS_HP : 0);
+    if (player.maxHp !== expectedMaxHp || player.hp > player.maxHp) return false;
+    if (!player.alive) {
+      if (player.hp !== 0 || !player.revealed) return false;
+      continue;
+    }
+    if (player.hp <= 0) {
+      if (!pendingDying || pendingDying.targetId !== player.id) return false;
+      if (pendingDying.required - pendingDying.offered !== 1 - player.hp) return false;
+    }
+  }
+  if (pendingDying) {
+    const target = players.find((player) => player.id === pendingDying.targetId);
+    if (!target?.alive || target.hp > 0) return false;
   }
   // 行动者已退场但对局仍在进行是**合法**状态：焚营在判定阶段致死、约斗反噬等
   // 都会让当前回合角色死在自己的回合里，`advancePhase` 会把这种“死人回合”
@@ -374,11 +393,12 @@ function validateState(data: unknown): data is DingState {
   // 被整局丢弃，因此这里只校验 activePlayerId 指向真实席位，不校验其存活。
   if (!validateStack(data, data.discard as unknown as readonly DingCard[])) return false;
 
+  const evaluatedWinner = evaluateWinner(players);
   if (data.status === "finished") {
     if (data.phase !== "finished" || (data.stack as unknown as readonly ResolutionFrame[]).length !== 0) return false;
     if (data.winner !== "lord-side" && data.winner !== "rebel" && data.winner !== "renegade") return false;
-    if (data.winner !== evaluateWinner(players)) return false;
-  } else if (data.winner !== undefined) return false;
+    if (data.winner !== evaluatedWinner) return false;
+  } else if (data.winner !== undefined || evaluatedWinner !== undefined) return false;
 
   const delayedTricks = data.delayedTricks as unknown as DingState["delayedTricks"];
   const delayedCards = [...PLAYER_IDS].flatMap((id) => delayedTricks[id as PlayerId].map((entry) => entry.card));
@@ -404,41 +424,59 @@ function isRecordWithCounts(value: unknown): boolean {
   return true;
 }
 
-function isLifetimeProfile(value: unknown): value is DingLifetimeProfile {
+function readLifetimeProfile(
+  value: unknown,
+  allowMissingHeroRecords = false,
+): DingLifetimeProfile | undefined {
   if (!isRecord(value)
     || !isNonNegativeInteger(value.gamesPlayed)
     || !isNonNegativeInteger(value.wins)
     || value.wins > value.gamesPlayed
     || !isRecord(value.identityRecords)
-    || !isRecord(value.heroRecords)) return false;
+    || !isRecord(value.heroRecords)) return undefined;
 
   const identityKeys = [...IDENTITIES];
   const identityRecords = value.identityRecords as unknown as Record<string, unknown>;
-  if (Object.keys(identityRecords).length !== identityKeys.length) return false;
+  if (Object.keys(identityRecords).length !== identityKeys.length) return undefined;
   let identityGames = 0;
   let identityWins = 0;
   for (const identity of identityKeys) {
-    if (!isRecordWithCounts(identityRecords[identity])) return false;
+    if (!isRecordWithCounts(identityRecords[identity])) return undefined;
     const record = identityRecords[identity] as { games: number; wins: number };
     identityGames += record.games;
     identityWins += record.wins;
   }
 
-  const heroRecords = value.heroRecords as unknown as Record<string, unknown>;
-  if (Object.keys(heroRecords).length !== HERO_IDS.length) return false;
+  const rawHeroRecords = value.heroRecords as unknown as Record<string, unknown>;
+  const heroKeys = Object.keys(rawHeroRecords);
+  if (heroKeys.some((heroId) => !HERO_IDS.includes(heroId as HeroId))) return undefined;
+  if (!allowMissingHeroRecords && heroKeys.length !== HERO_IDS.length) return undefined;
+
+  const heroRecords = Object.fromEntries(HERO_IDS.map((heroId) => {
+    const record = rawHeroRecords[heroId];
+    if (record === undefined && allowMissingHeroRecords) return [heroId, { games: 0, wins: 0 }];
+    return [heroId, record];
+  })) as unknown as DingLifetimeProfile["heroRecords"];
   let heroGames = 0;
   let heroWins = 0;
   for (const heroId of HERO_IDS) {
-    if (!isRecordWithCounts(heroRecords[heroId])) return false;
+    if (!isRecordWithCounts(heroRecords[heroId])) return undefined;
     const record = heroRecords[heroId] as { games: number; wins: number };
     heroGames += record.games;
     heroWins += record.wins;
   }
 
-  return value.gamesPlayed === identityGames
+  if (!(value.gamesPlayed === identityGames
     && value.wins === identityWins
     && value.gamesPlayed === heroGames
-    && value.wins === heroWins;
+    && value.wins === heroWins)) return undefined;
+
+  return {
+    gamesPlayed: value.gamesPlayed,
+    wins: value.wins,
+    identityRecords: identityRecords as unknown as DingLifetimeProfile["identityRecords"],
+    heroRecords,
+  };
 }
 
 function isActiveMatch(value: unknown, preferencesDifficulty: DingDifficulty): value is ActiveDingMatch {
@@ -455,17 +493,18 @@ function isActiveMatch(value: unknown, preferencesDifficulty: DingDifficulty): v
     && value.state.difficulty === preferencesDifficulty;
 }
 
-function restoreV8(data: unknown): DingRootState | undefined {
+function readRootState(data: unknown, allowMissingHeroRecords = false): DingRootState | undefined {
   if (!isRecord(data)
     || !isNonNegativeInteger(data.revision)
     || !isRecord(data.preferences)
-    || !isDifficulty(data.preferences.difficulty)
-    || !isLifetimeProfile(data.lifetimeProfile)) return undefined;
+    || !isDifficulty(data.preferences.difficulty)) return undefined;
+  const lifetimeProfile = readLifetimeProfile(data.lifetimeProfile, allowMissingHeroRecords);
+  if (!lifetimeProfile) return undefined;
 
   const base: DingRootState = {
     revision: data.revision,
     preferences: { difficulty: data.preferences.difficulty },
-    lifetimeProfile: data.lifetimeProfile,
+    lifetimeProfile,
   };
   if (data.activeMatch === undefined) return base;
   if (!isActiveMatch(data.activeMatch, base.preferences.difficulty)) return base;
@@ -489,7 +528,8 @@ export function restoreDingRootState(
   schemaVersion: number,
   data: unknown,
 ): DingRootState | undefined {
-  if (schemaVersion === DING_SAVE_SCHEMA_VERSION) return restoreV8(data);
+  if (schemaVersion === DING_SAVE_SCHEMA_VERSION) return readRootState(data);
+  if (schemaVersion === 8) return readRootState(data, true);
   if (schemaVersion === 7) {
     const migrated = restoreDingState(data);
     return migrated

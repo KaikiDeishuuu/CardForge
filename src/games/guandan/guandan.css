@@ -483,6 +483,29 @@
   animation: gd-message-in 260ms ease-out both;
 }
 
+.gd-trick > p.is-thinking {
+  color: #dec994;
+}
+
+.gd-thinking-dots {
+  margin-left: 5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  vertical-align: middle;
+}
+
+.gd-thinking-dots i {
+  width: 3px;
+  height: 3px;
+  background: currentColor;
+  border-radius: 50%;
+  animation: gd-thinking-dot 900ms ease-in-out infinite;
+}
+
+.gd-thinking-dots i:nth-child(2) { animation-delay: 120ms; }
+.gd-thinking-dots i:nth-child(3) { animation-delay: 240ms; }
+
 .gd-turn-flag {
   position: absolute;
   right: 14px;
@@ -586,12 +609,13 @@
 }
 
 .gd-hand-rows {
+  --gd-hand-overlap: clamp(-24px, calc(7.6923vw - 48.15px), -14px);
   width: min(100%, 900px);
-  height: 128px;
+  height: 134px;
   margin: 3px auto 5px;
   display: grid;
-  grid-template-rows: repeat(2, 62px);
-  overflow: hidden;
+  grid-template-rows: repeat(2, 67px);
+  overflow: visible;
 }
 
 .gd-hand-row {
@@ -602,7 +626,7 @@
 }
 
 .gd-hand-row .gd-card + .gd-card {
-  margin-left: -18px;
+  margin-left: var(--gd-hand-overlap);
 }
 
 .gd-card {
@@ -613,32 +637,63 @@
   display: block;
   color: #18303c;
   background:
-    linear-gradient(135deg, rgba(137, 95, 44, 0.07), transparent 45%),
+    radial-gradient(circle at 76% 62%, rgba(145, 103, 51, 0.08), transparent 38%),
+    repeating-linear-gradient(105deg, rgba(83, 64, 38, 0.022) 0 1px, transparent 1px 5px),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.72), transparent 42%),
     #f8f3e7;
-  border: 1px solid #cbbd9f;
-  border-radius: 4px;
-  box-shadow: 0 4px 8px rgba(25, 35, 34, 0.2), inset 0 0 0 2px rgba(255, 255, 255, 0.72);
+  border: 1px solid #c7b894;
+  border-radius: 6px;
+  box-shadow: 0 4px 9px rgba(25, 35, 34, 0.22), inset 0 0 0 2px rgba(255, 255, 255, 0.66);
   font-family: Georgia, "Times New Roman", serif;
+  overflow: hidden;
 }
 
 button.gd-card {
   padding: 0;
   text-align: left;
   cursor: pointer;
-  transition: transform 150ms ease, box-shadow 150ms ease;
+  transition: transform 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
 }
 
-button.gd-card:hover,
-button.gd-card:focus-visible {
-  z-index: 30;
+button.gd-card:hover:not(.is-selected),
+button.gd-card:focus-visible:not(.is-selected) {
   transform: translateY(-4px);
 }
 
-.gd-card.is-selected {
-  z-index: 40;
+button.gd-card:focus-visible {
+  outline: 2px solid #e4a94e;
+  outline-offset: -3px;
+}
+
+button.gd-card.is-selected {
   border-color: #a53232;
-  box-shadow: 0 0 0 2px #bd4b42, 0 8px 12px rgba(52, 35, 31, 0.24);
+  box-shadow:
+    0 0 0 2px #bd4b42,
+    0 9px 14px rgba(52, 35, 31, 0.28),
+    inset 0 0 0 2px rgba(255, 247, 225, 0.78);
   transform: translateY(-8px);
+}
+
+button.gd-card.is-selected::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 16px;
+  height: 4px;
+  background: #b33a37;
+  border-radius: 0 0 5px 5px;
+  box-shadow: 0 1px 3px rgba(110, 31, 29, 0.28);
+  transform: translateX(-50%);
+}
+
+.gd-card.is-wild {
+  background:
+    radial-gradient(circle at 72% 65%, rgba(179, 58, 55, 0.14), transparent 38%),
+    repeating-linear-gradient(105deg, rgba(83, 64, 38, 0.022) 0 1px, transparent 1px 5px),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.75), transparent 42%),
+    #faf0dc;
+  border-color: #c49b61;
 }
 
 .gd-card--hearts,
@@ -664,6 +719,20 @@ button.gd-card:focus-visible {
   line-height: 1;
 }
 
+.gd-card__pip {
+  position: absolute;
+  top: 54%;
+  left: 61%;
+  font-size: 24px;
+  line-height: 1;
+  opacity: 0.13;
+  transform: translate(-50%, -50%);
+}
+
+.gd-card.is-wild .gd-card__pip {
+  opacity: 0.2;
+}
+
 .gd-card--joker .gd-card__rank {
   top: 6px;
   left: 7px;
@@ -676,6 +745,14 @@ button.gd-card:focus-visible {
   left: 7px;
   font-family: var(--gd-serif);
   font-size: 18px;
+}
+
+.gd-card--joker .gd-card__pip {
+  top: 57%;
+  left: 59%;
+  font-family: var(--gd-serif);
+  font-size: 21px;
+  opacity: 0.15;
 }
 
 .gd-card__wild {
@@ -1148,6 +1225,11 @@ button.gd-card:focus-visible {
   to { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes gd-thinking-dot {
+  0%, 65%, 100% { opacity: 0.28; transform: translateY(0); }
+  32% { opacity: 1; transform: translateY(-2px); }
+}
+
 @keyframes gd-card-drop {
   from { opacity: 0; transform: translateY(-18px) rotate(5deg); }
   to { opacity: 1; transform: translateY(0) rotate(0); }
@@ -1214,10 +1296,13 @@ button.gd-card:focus-visible {
   .gd-seat--east, .gd-seat--west { top: 66px; }
   .gd-trick { min-height: 138px; }
   .gd-trick__cards { min-height: 65px; }
-  .gd-hand-dock { min-height: 218px; }
-  .gd-hand-rows { height: 112px; grid-template-rows: repeat(2, 55px); }
+  .gd-hand-dock { min-height: 228px; }
+  .gd-hand-rows {
+    --gd-hand-overlap: clamp(-21px, calc(7.6923vw - 44.92px), -13px);
+    height: 122px;
+    grid-template-rows: repeat(2, 61px);
+  }
   .gd-card { width: 40px; height: 53px; }
-  .gd-hand-row .gd-card + .gd-card { margin-left: -17px; }
   .gd-actions .gd-action { min-height: 39px; }
 }
 
@@ -1229,6 +1314,11 @@ button.gd-card:focus-visible {
   .gd-modal,
   .gd-result-board {
     animation: none;
+  }
+
+  .gd-thinking-dots i {
+    animation: none;
+    opacity: 0.72;
   }
 }
 
@@ -1335,6 +1425,7 @@ button.gd-card:focus-visible {
   }
 
   .gd-hand-rows {
+    --gd-hand-overlap: -14px;
     height: 80px;
     margin-block: 3px 5px;
     display: flex;
@@ -1354,7 +1445,7 @@ button.gd-card:focus-visible {
   }
 
   .gd-hand-row .gd-card + .gd-card {
-    margin-left: -14px;
+    margin-left: var(--gd-hand-overlap);
   }
 
   .gd-card {
@@ -1372,6 +1463,10 @@ button.gd-card:focus-visible {
     top: 23px;
     left: 7px;
     font-size: 12px;
+  }
+
+  .gd-card__pip {
+    font-size: 29px;
   }
 
   .gd-actions {

@@ -42,12 +42,12 @@ function craftedDeadActorState(): DingState {
     {
       id: "north", displayName: "北座", controller: "ai", seat: 2,
       identity: "loyalist", revealed: false, hp: 4, maxHp: 4, alive: true,
-      hand: [strike], equipment: {}, heroId: HERO_IDS[2], skillFlags: {},
+      hand: [strike], equipment: {}, heroId: HERO_IDS[4], skillFlags: {},
     },
     {
       id: "west", displayName: "西座", controller: "ai", seat: 3,
       identity: "renegade", revealed: false, hp: 4, maxHp: 4, alive: true,
-      hand: [], equipment: {}, heroId: HERO_IDS[3], skillFlags: {},
+      hand: [], equipment: {}, heroId: HERO_IDS[12], skillFlags: {},
     },
   ];
   let game: DingState = {
@@ -93,12 +93,12 @@ function craftedTrickChain(): DingState {
     {
       id: "north", displayName: "北座", controller: "ai", seat: 2,
       identity: "loyalist", revealed: false, hp: 4, maxHp: 4, alive: true,
-      hand: [], equipment: {}, heroId: HERO_IDS[2], skillFlags: {},
+      hand: [], equipment: {}, heroId: HERO_IDS[4], skillFlags: {},
     },
     {
       id: "west", displayName: "西座", controller: "ai", seat: 3,
       identity: "renegade", revealed: false, hp: 4, maxHp: 4, alive: true,
-      hand: [], equipment: {}, heroId: HERO_IDS[3], skillFlags: {},
+      hand: [], equipment: {}, heroId: HERO_IDS[12], skillFlags: {},
     },
   ];
   return {
@@ -148,7 +148,7 @@ function craftedSkillState(): DingState {
   const players: DingPlayer[] = [
     {
       id: "south", displayName: "你", controller: "human", seat: 0,
-      identity: "lord", revealed: true, hp: 4, maxHp: 5, alive: true,
+      identity: "lord", revealed: true, hp: 3, maxHp: 4, alive: true,
       hand: [cost], equipment: {}, heroId: "springtide",
       skillFlags: { "active:qingnang": true },
     },
@@ -165,7 +165,7 @@ function craftedSkillState(): DingState {
     {
       id: "west", displayName: "西座", controller: "ai", seat: 3,
       identity: "renegade", revealed: false, hp: 4, maxHp: 4, alive: true,
-      hand: [], equipment: {}, heroId: HERO_IDS[3], skillFlags: {},
+      hand: [], equipment: {}, heroId: HERO_IDS[12], skillFlags: {},
     },
   ];
   return {
@@ -198,7 +198,7 @@ function craftedSelfSkillState(): DingState {
   const players: DingPlayer[] = [
     {
       id: "south", displayName: "你", controller: "human", seat: 0,
-      identity: "lord", revealed: true, hp: 5, maxHp: 5, alive: true,
+      identity: "lord", revealed: true, hp: 4, maxHp: 4, alive: true,
       hand: [], equipment: {}, heroId: "lastwill",
       skillFlags: { "active:yujin": true },
     },
@@ -210,12 +210,12 @@ function craftedSelfSkillState(): DingState {
     {
       id: "north", displayName: "北座", controller: "ai", seat: 2,
       identity: "loyalist", revealed: false, hp: 4, maxHp: 4, alive: true,
-      hand: [], equipment: {}, heroId: HERO_IDS[2], skillFlags: {},
+      hand: [], equipment: {}, heroId: HERO_IDS[4], skillFlags: {},
     },
     {
       id: "west", displayName: "西座", controller: "ai", seat: 3,
       identity: "renegade", revealed: false, hp: 4, maxHp: 4, alive: true,
-      hand: [], equipment: {}, heroId: HERO_IDS[3], skillFlags: {},
+      hand: [], equipment: {}, heroId: HERO_IDS[12], skillFlags: {},
     },
   ];
   return {
@@ -260,12 +260,12 @@ function craftedDelayedState(): DingState {
     {
       id: "north", displayName: "北座", controller: "ai", seat: 2,
       identity: "loyalist", revealed: false, hp: 4, maxHp: 4, alive: true,
-      hand: [], equipment: {}, heroId: HERO_IDS[2], skillFlags: {},
+      hand: [], equipment: {}, heroId: HERO_IDS[4], skillFlags: {},
     },
     {
       id: "west", displayName: "西座", controller: "ai", seat: 3,
       identity: "renegade", revealed: false, hp: 4, maxHp: 4, alive: true,
-      hand: [], equipment: {}, heroId: HERO_IDS[3], skillFlags: {},
+      hand: [], equipment: {}, heroId: HERO_IDS[12], skillFlags: {},
     },
   ];
   return {
@@ -312,12 +312,12 @@ function craftedHordeState(): DingState {
     {
       id: "north", displayName: "北座", controller: "ai", seat: 2,
       identity: "loyalist", revealed: false, hp: 4, maxHp: 4, alive: true,
-      hand: [], equipment: {}, heroId: HERO_IDS[2], skillFlags: {},
+      hand: [], equipment: {}, heroId: HERO_IDS[4], skillFlags: {},
     },
     {
       id: "west", displayName: "西座", controller: "ai", seat: 3,
       identity: "renegade", revealed: false, hp: 4, maxHp: 4, alive: true,
-      hand: [], equipment: {}, heroId: HERO_IDS[3], skillFlags: {},
+      hand: [], equipment: {}, heroId: HERO_IDS[12], skillFlags: {},
     },
   ];
   return {
@@ -347,7 +347,8 @@ function craftedHordeState(): DingState {
 }
 
 describe("Ding Ding persistence", () => {
-  it("round-trips a pending hero draft in the v8 root archive", () => {
+  it("uses schema v9 and round-trips a pending hero draft", () => {
+    expect(DING_SAVE_SCHEMA_VERSION).toBe(9);
     const initial = startDingMatchWithHeroDraft(createDefaultDingRootState(), "standard", () => 0.37);
     const restored = restoreDingRootState(
       DING_SAVE_SCHEMA_VERSION,
@@ -357,7 +358,7 @@ describe("Ding Ding persistence", () => {
     expect(restored?.activeMatch?.heroDraft?.options).toHaveLength(3);
   });
 
-  it("round-trips the v8 root archive and active table", () => {
+  it("round-trips the v9 root archive and active table", () => {
     const initial = createInitialState(() => 0.37);
     const root = startDingMatch(createDefaultDingRootState(), initial);
     const restored = restoreDingRootState(
@@ -368,7 +369,65 @@ describe("Ding Ding persistence", () => {
     expect(restored?.activeMatch?.state).toEqual(initial);
   });
 
-  it("migrates a v7 single-table save into the v8 archive", () => {
+  it("migrates a complete current-content v8 root without dropping its active table", () => {
+    const initial = createInitialState(() => 0.37);
+    const root = startDingMatch(createDefaultDingRootState(), initial);
+    const restored = restoreDingRootState(
+      8,
+      JSON.parse(JSON.stringify(serializeDingRootState(root))),
+    );
+    expect(restored).toEqual(root);
+    expect(restored?.activeMatch?.state).toEqual(initial);
+  });
+
+  it("migrates a nine-hero v8 archive by zero-filling later hero records", () => {
+    const legacy = JSON.parse(JSON.stringify(serializeDingRootState(createDefaultDingRootState()))) as {
+      revision: number;
+      lifetimeProfile: {
+        gamesPlayed: number;
+        wins: number;
+        identityRecords: Record<string, { games: number; wins: number }>;
+        heroRecords: Record<string, { games: number; wins: number }>;
+      };
+    };
+    legacy.revision = 7;
+    legacy.lifetimeProfile.gamesPlayed = 1;
+    legacy.lifetimeProfile.wins = 1;
+    legacy.lifetimeProfile.identityRecords.lord = { games: 1, wins: 1 };
+    legacy.lifetimeProfile.heroRecords.redblade = { games: 1, wins: 1 };
+    for (const heroId of HERO_IDS.slice(9)) delete legacy.lifetimeProfile.heroRecords[heroId];
+
+    const restored = restoreDingRootState(8, legacy);
+    expect(restored?.revision).toBe(7);
+    expect(restored?.lifetimeProfile.gamesPlayed).toBe(1);
+    expect(restored?.lifetimeProfile.heroRecords.redblade).toEqual({ games: 1, wins: 1 });
+    for (const heroId of HERO_IDS.slice(9)) {
+      expect(restored?.lifetimeProfile.heroRecords[heroId]).toEqual({ games: 0, wins: 0 });
+    }
+    expect(restoreDingRootState(DING_SAVE_SCHEMA_VERSION, legacy)).toBeUndefined();
+  });
+
+  it("preserves a nine-hero v8 archive when its old active table is unsafe to migrate", () => {
+    const initial = createInitialState(() => 0.37, "standard", HERO_IDS.slice(0, 4));
+    const root = startDingMatch(createDefaultDingRootState(), initial);
+    const legacy = JSON.parse(JSON.stringify(serializeDingRootState(root))) as {
+      lifetimeProfile: { heroRecords: Record<string, { games: number; wins: number }> };
+      activeMatch: { state: { players: Array<{ identity: string; hp: number; maxHp: number }> } };
+    };
+    for (const heroId of HERO_IDS.slice(9)) delete legacy.lifetimeProfile.heroRecords[heroId];
+    // 103711b 的九名武将尚未声明非对称基础体力，全部按 4（主君 5）存储。
+    for (const player of legacy.activeMatch.state.players) {
+      player.maxHp = player.identity === "lord" ? 5 : 4;
+      player.hp = player.maxHp;
+    }
+
+    const restored = restoreDingRootState(8, legacy);
+    expect(restored).toBeDefined();
+    expect(restored?.activeMatch).toBeUndefined();
+    expect(Object.keys(restored?.lifetimeProfile.heroRecords ?? {})).toEqual([...HERO_IDS]);
+  });
+
+  it("migrates a v7 single-table save into the v9 archive", () => {
     const initial = createInitialState(() => 0.37);
     const restored = restoreDingRootState(7, JSON.parse(JSON.stringify(serializeDingState(initial))));
     expect(restored?.activeMatch?.state).toEqual(initial);
@@ -455,7 +514,7 @@ describe("Ding Ding persistence", () => {
     const players: DingPlayer[] = [
       {
         id: "south", displayName: "你", controller: "human", seat: 0,
-        identity: "lord", revealed: true, hp: 5, maxHp: 5, alive: true,
+        identity: "lord", revealed: true, hp: 4, maxHp: 4, alive: true,
         hand: [cost], equipment: {}, heroId: "chongzhen",
         skillFlags: { "active:xianzhen": true },
       },
@@ -467,12 +526,12 @@ describe("Ding Ding persistence", () => {
       {
         id: "north", displayName: "北座", controller: "ai", seat: 2,
         identity: "loyalist", revealed: false, hp: 4, maxHp: 4, alive: true,
-        hand: [], equipment: {}, heroId: HERO_IDS[2], skillFlags: {},
+        hand: [], equipment: {}, heroId: HERO_IDS[4], skillFlags: {},
       },
       {
         id: "west", displayName: "西座", controller: "ai", seat: 3,
         identity: "renegade", revealed: false, hp: 4, maxHp: 4, alive: true,
-        hand: [], equipment: {}, heroId: HERO_IDS[3], skillFlags: {},
+        hand: [], equipment: {}, heroId: HERO_IDS[12], skillFlags: {},
       },
     ];
     const crafted: DingState = {
@@ -541,12 +600,12 @@ describe("Ding Ding persistence", () => {
       {
         id: "north", displayName: "北座", controller: "ai", seat: 2,
         identity: "loyalist", revealed: false, hp: 4, maxHp: 4, alive: true,
-        hand: [cost], equipment: {}, heroId: HERO_IDS[2], skillFlags: {},
+        hand: [cost], equipment: {}, heroId: HERO_IDS[4], skillFlags: {},
       },
       {
         id: "west", displayName: "西座", controller: "ai", seat: 3,
         identity: "renegade", revealed: false, hp: 4, maxHp: 4, alive: true,
-        hand: [], equipment: {}, heroId: HERO_IDS[3], skillFlags: {},
+        hand: [], equipment: {}, heroId: HERO_IDS[12], skillFlags: {},
       },
     ];
     const crafted: DingState = {
@@ -594,12 +653,12 @@ describe("Ding Ding persistence", () => {
       {
         id: "north", displayName: "北座", controller: "ai", seat: 2,
         identity: "loyalist", revealed: false, hp: 4, maxHp: 4, alive: true,
-        hand: [], equipment: {}, heroId: HERO_IDS[2], skillFlags: {},
+        hand: [], equipment: {}, heroId: HERO_IDS[4], skillFlags: {},
       },
       {
         id: "west", displayName: "西座", controller: "ai", seat: 3,
         identity: "renegade", revealed: false, hp: 4, maxHp: 4, alive: true,
-        hand: [], equipment: {}, heroId: HERO_IDS[3], skillFlags: {},
+        hand: [], equipment: {}, heroId: HERO_IDS[12], skillFlags: {},
       },
     ];
     const crafted: DingState = {
@@ -641,12 +700,62 @@ describe("Ding Ding persistence", () => {
     expect(restoreDingState(undefined)).toBeUndefined();
     expect(restoreDingState({ status: "broken" })).toBeUndefined();
     expect(restoreDingState(tamper({ phase: "bidding" }))).toBeUndefined();
+    expect(restoreDingState(tamper({ status: "playing", phase: "finished" }))).toBeUndefined();
+    expect(restoreDingState(tamper({ status: "finished", phase: "play" }))).toBeUndefined();
     expect(restoreDingState(tamper({ players: [] }))).toBeUndefined();
     expect(restoreDingState(tamper({ deck: [{}] }))).toBeUndefined();
     expect(restoreDingState(tamper({ activePlayerId: "nobody" }))).toBeUndefined();
     expect(restoreDingState(tamper({ rngSeed: -1 }))).toBeUndefined();
     expect(restoreDingState(tamper({ difficulty: "nightmare" }))).toBeUndefined();
     expect(restoreDingState(tamper({ stack: [{ kind: "mystery" }] }))).toBeUndefined();
+  });
+
+  it("rejects cards whose persisted metadata differs from the catalog", () => {
+    const forgedRange = tamper({}) as MutableDingState;
+    const rangedCard = [
+      ...forgedRange.deck,
+      ...forgedRange.players.flatMap((player) => player.hand),
+    ].find((card) => card.range !== undefined)!;
+    (rangedCard as { range?: number }).range = 99;
+    expect(restoreDingState(forgedRange)).toBeUndefined();
+
+    const forgedName = tamper({}) as MutableDingState;
+    (forgedName.deck[0] as unknown as { name: string }).name = "伪造牌名";
+    expect(restoreDingState(forgedName)).toBeUndefined();
+  });
+
+  it("validates hero and lord max hp and ties non-positive hp to the top dying frame", () => {
+    const wrongMaxHp = tamper({}) as MutableDingState;
+    wrongMaxHp.players = wrongMaxHp.players.map((player, index) =>
+      index === 0 ? { ...player, maxHp: player.maxHp + 1 } : player,
+    );
+    expect(restoreDingState(wrongMaxHp)).toBeUndefined();
+
+    const negativeWithoutDying = tamper({}) as MutableDingState;
+    const targetId = negativeWithoutDying.players[0].id;
+    negativeWithoutDying.players = negativeWithoutDying.players.map((player) =>
+      player.id === targetId ? { ...player, hp: -1 } : player,
+    );
+    expect(restoreDingState(negativeWithoutDying)).toBeUndefined();
+
+    const validDying = tamper({}) as MutableDingState;
+    validDying.players = validDying.players.map((player) =>
+      player.id === targetId ? { ...player, hp: -1 } : player,
+    );
+    validDying.stack = [{
+      kind: "dying",
+      targetId,
+      required: 2,
+      offered: 0,
+      responders: validDying.players.map((player) => player.id),
+      cursor: 0,
+    }];
+    expect(restoreDingState(validDying)).toEqual(validDying);
+
+    const mismatchedDying = JSON.parse(JSON.stringify(validDying)) as MutableDingState;
+    const dyingFrame = mismatchedDying.stack[0] as Extract<DingState["stack"][number], { kind: "dying" }>;
+    mismatchedDying.stack = [{ ...dyingFrame, required: 3 }];
+    expect(restoreDingState(mismatchedDying)).toBeUndefined();
   });
 
   it("rejects tampered identity metadata, winner state and stack invariants", () => {
@@ -658,6 +767,14 @@ describe("Ding Ding persistence", () => {
 
     const badWinner = tamper({ status: "playing", winner: "rebel" });
     expect(restoreDingState(badWinner)).toBeUndefined();
+
+    const unfinalizedWinner = tamper({}) as MutableDingState;
+    unfinalizedWinner.players = unfinalizedWinner.players.map((player) =>
+      player.identity === "rebel" || player.identity === "renegade"
+        ? { ...player, alive: false, hp: 0, revealed: true }
+        : player,
+    );
+    expect(restoreDingState(unfinalizedWinner)).toBeUndefined();
 
     const danglingCounter = JSON.parse(JSON.stringify(serializeDingState(craftedTrickChain()))) as DingState;
     const nullifyFrame = danglingCounter.stack[1];

@@ -1,6 +1,42 @@
 import { generateLegalCombos, getPlayer, isWild } from "./engine";
 import type { AiMove, CardCombo, GuandanDifficulty, GuandanState, PlayerId } from "./types";
 
+const THINKING_CADENCE: Readonly<Record<PlayerId, number>> = {
+  human: 41,
+  east: 97,
+  partner: 151,
+  west: 211,
+};
+
+const DIFFICULTY_THINKING_TIME: Readonly<Record<GuandanDifficulty, number>> = {
+  relaxed: 0,
+  standard: 90,
+  tactician: 190,
+};
+
+/**
+ * 给牌桌演出用的稳定思考时长。它只读取局面，不使用随机数，因此刷新、
+ * 测试和同一局重放都保持一致；真正的倍速换算仍由共享设置层负责。
+ */
+export function getAiThinkingDuration(state: GuandanState, actorId: PlayerId): number {
+  const actor = getPlayer(state, actorId);
+  const handComplexity = Math.min(actor.hand.length, 27) * 10;
+  const situationComplexity = state.trick
+    ? Math.min(state.trick.combo.cards.length * 26, 160)
+    : 230;
+  const cadence = (
+    state.revision * 73
+    + THINKING_CADENCE[actorId]
+    + actor.hand.length * 17
+  ) % 181;
+
+  return 760
+    + handComplexity
+    + situationComplexity
+    + DIFFICULTY_THINKING_TIME[state.difficulty]
+    + cadence;
+}
+
 function comboScore(combo: CardCombo, leading: boolean, handSize: number): number {
   if (combo.cards.length === handSize) return -100_000;
   const bombPenalty = combo.type === "bomb" ? 10_000 : 0;
