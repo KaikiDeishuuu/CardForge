@@ -1,4 +1,4 @@
-import { texasRankValue } from "./cards";
+import { TEXAS_RANKS, TEXAS_SUITS, texasRankValue } from "./cards";
 import type { EvaluatedHand, HandCategory, TexasCard } from "./types";
 
 const CATEGORY_POWER: Readonly<Record<HandCategory, number>> = {
@@ -139,4 +139,38 @@ export function evaluateTexasHand(cards: readonly TexasCard[]): EvaluatedHand {
     if (compareEvaluatedHands(candidate, best) > 0) best = candidate;
   }
   return best;
+}
+
+export function handCategoryPower(category: HandCategory): number {
+  return CATEGORY_POWER[category];
+}
+
+/**
+ * Counts the unseen cards that would lift this holding to a straight or better.
+ *
+ * Made-hand categories alone say nothing about a four-flush or an open-ended
+ * run, so a bot pricing a call from `category` treats a live draw as the air it
+ * currently is. Only straight-or-better completions count: pair and two-pair
+ * improvements are already reflected in the made-hand category, and folding
+ * them into the same number would double-count them.
+ *
+ * The opponent's hole cards are deliberately treated as unseen, which is how
+ * outs are counted at the table.
+ */
+export function countStraightOrBetterOuts(cards: readonly TexasCard[]): number {
+  if (cards.length < 5 || cards.length > 6) return 0;
+  const current = evaluateTexasHand(cards);
+  if (CATEGORY_POWER[current.category] >= CATEGORY_POWER.straight) return 0;
+
+  const seen = new Set(cards.map((card) => `${card.suit}-${card.rank}`));
+  let outs = 0;
+  for (const suit of TEXAS_SUITS) {
+    for (const rank of TEXAS_RANKS) {
+      const id = `${suit}-${rank}`;
+      if (seen.has(id)) continue;
+      const improved = evaluateTexasHand([...cards, { id, name: id, suit, rank }]);
+      if (CATEGORY_POWER[improved.category] >= CATEGORY_POWER.straight) outs += 1;
+    }
+  }
+  return outs;
 }
