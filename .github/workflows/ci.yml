@@ -177,4 +177,24 @@ jobs:
             --resolve "$SITE_HOST:443:127.0.0.1" "https://$SITE_HOST/")
           echo "origin GET https://$SITE_HOST/ -> $code   (current -> $link)"
           [ "$code" = "200" ]
+
+          # 入口引用的首个 JS chunk 必须真实可加载，且缺失 chunk 必须保持 404：
+          # GameHost 的模块加载失败恢复依赖后者，不能落入 SPA 的 index.html 回落。
+          html=$(curl -sS --retry 3 --retry-delay 2 \
+            --resolve "$SITE_HOST:443:127.0.0.1" "https://$SITE_HOST/")
+          entry_asset=$(printf '%s' "$html" | sed -n 's/.*src="\([^"]*\.js\)".*/\1/p' | head -n 1)
+          if [ -z "$entry_asset" ]; then
+            echo "index.html 未包含入口脚本，拒绝发布" >&2
+            exit 1
+          fi
+          asset_code=$(curl -sS -o /dev/null -w '%{http_code}' --retry 3 --retry-delay 2 \
+            --resolve "$SITE_HOST:443:127.0.0.1" "https://$SITE_HOST$entry_asset")
+          echo "origin GET https://$SITE_HOST$entry_asset -> $asset_code"
+          [ "$asset_code" = "200" ]
+
+          missing_code=$(curl -sS -o /dev/null -w '%{http_code}' --retry 3 --retry-delay 2 \
+            --resolve "$SITE_HOST:443:127.0.0.1" \
+            "https://$SITE_HOST/assets/cardforge-missing-chunk.js")
+          echo "origin GET missing chunk -> $missing_code"
+          [ "$missing_code" = "404" ]
           REMOTE

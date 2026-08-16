@@ -27,7 +27,7 @@ function storePlaybackSpeed(speed: PlaybackSpeed) {
 }
 
 /**
- * 三张牌桌共享的 AI 演出速度偏好：只影响等待动画/间隔，不改变规则。
+ * 多张牌桌共享的 AI 演出速度偏好：只影响等待动画/间隔，不改变规则。
  * 偏好保存在本机并跨标签同步，默认 1×。
  */
 export function usePlaybackSpeed(): { speed: PlaybackSpeed; cycle: () => void } {

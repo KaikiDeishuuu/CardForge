@@ -74,7 +74,7 @@ export function Lobby({ games, soundEnabled, onToggleSound, onLaunch }: LobbyPro
           <span><strong>CardForge</strong><small>卡牌工坊</small></span>
         </a>
         <div className="lobby-header__meta">
-          <span className="build-label">原型构建 · 03</span>
+          <span className="build-label">原型构建 · {String(launchableCount).padStart(2, "0")}</span>
           <button type="button" className="sound-button" onClick={onToggleSound}>
             <span aria-hidden="true">{soundEnabled ? "♪" : "×"}</span>
             {soundEnabled ? "声音开" : "声音关"}

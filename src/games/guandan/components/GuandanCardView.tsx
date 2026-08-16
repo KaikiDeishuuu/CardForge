@@ -14,7 +14,9 @@ interface GuandanCardViewProps {
   levelRank: NumberRank;
   selected?: boolean;
   selectable?: boolean;
+  disabled?: boolean;
   compact?: boolean;
+  tabIndex?: number;
   onSelect?: (id: string) => void;
 }
 
@@ -23,7 +25,9 @@ export function GuandanCardView({
   levelRank,
   selected = false,
   selectable = false,
+  disabled = false,
   compact = false,
+  tabIndex,
   onSelect,
 }: GuandanCardViewProps) {
   const wild = isWild(card, levelRank);
@@ -43,9 +47,12 @@ export function GuandanCardView({
       <button
         type="button"
         className={className}
+        data-card-id={card.id}
         onClick={() => onSelect?.(card.id)}
+        disabled={disabled}
+        tabIndex={tabIndex}
         aria-pressed={selected}
-        aria-label={`${card.name}${wild ? "，百搭级牌" : ""}`}
+        aria-label={`${card.name}${wild ? "，百搭级牌" : ""}${selected ? "，已选中" : ""}`}
       >
         <CardFace rank={rank} symbol={symbol} wild={wild} deckIndex={card.deckIndex} />
       </button>

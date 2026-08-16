@@ -129,68 +129,85 @@ export function SetupLedger({
   const [assistEnabled, setAssistEnabled] = useState(root.preferences.assistEnabled);
   const [confirmReset, setConfirmReset] = useState(false);
   const challenge = choice === "classic" ? undefined : CHALLENGES[choice];
+  const selectedPreset = identifyRulesPreset(rules);
+  const selectedRulesCopy = selectedPreset === "custom"
+    ? { name: "自定义房规", note: `${rules.deckCount} 副 · ${rules.dealerSoft17 === "stand" ? "S17" : "H17"} · ${rules.blackjackPayout}` }
+    : PRESET_COPY[selectedPreset];
 
   return (
     <article className="rule-ledger setup-ledger">
       <button type="button" className="rule-ledger__close" onClick={onExit} aria-label="返回游戏大厅">×</button>
       <button type="button" className="rule-ledger__sound" onClick={onToggleSound} aria-label={soundEnabled ? "关闭声音" : "开启声音"}>{soundEnabled ? "♪" : "×"}</button>
-      <small>TABLE 002 · ENTRY</small>
-      <h2 id="twenty-one-setup-title">选择这一席<br />如何开始。</h2>
-      <p>经典模式保留筹码直到你主动离桌；挑战使用固定六副标准房规，并给每一段冒险一个终点。</p>
-      <div className="tw-mode-grid" role="radiogroup" aria-label="牌局模式">
-        <button type="button" role="radio" aria-checked={choice === "classic"} className={choice === "classic" ? "is-selected" : ""} onClick={() => setChoice("classic")}>
-          <small>CLASSIC</small><strong>经典牌桌</strong><span>500 筹码 · 不限手数</span>
-        </button>
-        {(Object.values(CHALLENGES)).map((entry) => {
-          const record = root.challengeRecords[entry.id];
-          return (
-            <button key={entry.id} type="button" role="radio" aria-checked={choice === entry.id} className={choice === entry.id ? "is-selected" : ""} onClick={() => setChoice(entry.id)}>
-              <small>{entry.eyebrow}</small><strong>{entry.name}</strong><span>{entry.description}</span>
-              <em className="tw-challenge-record">
-                无辅助 {record.unassisted.clears}/{record.unassisted.runs} · 辅助 {record.assisted.clears}/{record.assisted.runs}
-                {record.unassisted.bestFinalChips !== undefined && <i>最佳 {record.unassisted.bestFinalChips}</i>}
-              </em>
-            </button>
-          );
-        })}
-      </div>
-
-      <section className="tw-setup-detail">
-        <h3>{challenge ? "挑战条件" : "经典房规"}</h3>
-        {challenge ? (
-          <>
-            <div className="tw-challenge-goal"><strong>{challenge.targetChips}</strong><span>目标筹码</span><i>{challenge.roundLimit} 手上限</i></div>
-            <RulesSummary rules={STANDARD_SIX_RULES} />
-          </>
-        ) : <RulesForm rules={rules} onChange={setRules} />}
-      </section>
-
-      <label className="tw-assist-toggle">
-        <input type="checkbox" checked={assistEnabled} onChange={(event) => setAssistEnabled(event.target.checked)} />
-        <span><strong>可选策略提示</strong><small>只高亮建议，不会替你行动；挑战会标记辅助记录。</small></span>
-      </label>
-      <div className="tw-setup-archive">
-        <span>本机档案 · {root.lifetimeStats.roundsPlayed} 局</span>
-        {confirmReset ? (
-          <span className="tw-confirm-row">
-            <button type="button" onClick={() => { onResetArchive(); setConfirmReset(false); }}>确认清空</button>
-            <button type="button" onClick={() => setConfirmReset(false)}>取消</button>
-          </span>
-        ) : <button type="button" onClick={() => setConfirmReset(true)}>清空统计</button>}
-      </div>
-      {saveWarning && (
-        <div className="tw-save-warning" role="alert">
-          <span>{saveWarning}</span>
-          {onResetSave && <button type="button" onClick={onResetSave}>重置旧存档并启用保存</button>}
+      <div className="setup-ledger__scroll">
+        <small>TABLE 002 · ENTRY</small>
+        <h2 id="twenty-one-setup-title">选择玩法</h2>
+        <p>经典牌桌适合连续游玩；挑战模式有明确的目标与手数上限。</p>
+        <div className="tw-mode-grid" role="radiogroup" aria-label="牌局模式">
+          <button type="button" role="radio" aria-checked={choice === "classic"} className={choice === "classic" ? "is-selected" : ""} onClick={() => setChoice("classic")}>
+            <small>CLASSIC</small><strong>经典牌桌</strong><span>500 筹码 · 不限手数</span>
+          </button>
+          {(Object.values(CHALLENGES)).map((entry) => {
+            const record = root.challengeRecords[entry.id];
+            return (
+              <button key={entry.id} type="button" role="radio" aria-checked={choice === entry.id} className={choice === entry.id ? "is-selected" : ""} onClick={() => setChoice(entry.id)}>
+                <small>{entry.eyebrow}</small><strong>{entry.name}</strong><span>{entry.description}</span>
+                <em className="tw-challenge-record">
+                  无辅助 {record.unassisted.clears}/{record.unassisted.runs} · 辅助 {record.assisted.clears}/{record.assisted.runs}
+                  {record.unassisted.bestFinalChips !== undefined && <i>最佳 {record.unassisted.bestFinalChips}</i>}
+                </em>
+              </button>
+            );
+          })}
         </div>
-      )}
-      <button
-        type="button"
-        className="rule-ledger__enter"
-        onClick={() => choice === "classic" ? onStartClassic(rules, assistEnabled) : onStartChallenge(choice, assistEnabled)}
-      >
-        {challenge ? `开始「${challenge.name}」` : "入座经典牌桌"}<span>→</span>
-      </button>
+
+        <section className="tw-setup-detail">
+          <h3>{challenge ? "挑战条件" : "经典房规"}</h3>
+          {challenge ? (
+            <>
+              <div className="tw-challenge-goal"><strong>{challenge.targetChips}</strong><span>目标筹码</span><i>{challenge.roundLimit} 手上限</i></div>
+              <RulesSummary rules={STANDARD_SIX_RULES} />
+            </>
+          ) : (
+            <details className="tw-classic-rules">
+              <summary>
+                <span><strong>{selectedRulesCopy.name}</strong><small>{selectedRulesCopy.note}</small></span>
+                <b>调整房规</b>
+              </summary>
+              <RulesForm rules={rules} onChange={setRules} />
+            </details>
+          )}
+        </section>
+
+        <label className="tw-assist-toggle">
+          <input type="checkbox" checked={assistEnabled} onChange={(event) => setAssistEnabled(event.target.checked)} />
+          <span><strong>可选策略提示</strong><small>只高亮建议，不会替你行动；挑战会标记辅助记录。</small></span>
+        </label>
+        <div className="tw-setup-archive">
+          <span>本机档案 · {root.lifetimeStats.roundsPlayed} 局</span>
+          {confirmReset ? (
+            <span className="tw-confirm-row">
+              <button type="button" onClick={() => { onResetArchive(); setConfirmReset(false); }}>确认清空</button>
+              <button type="button" onClick={() => setConfirmReset(false)}>取消</button>
+            </span>
+          ) : <button type="button" onClick={() => setConfirmReset(true)}>清空统计</button>}
+        </div>
+        {saveWarning && (
+          <div className="tw-save-warning" role="alert">
+            <span>{saveWarning}</span>
+            {onResetSave && <button type="button" onClick={onResetSave}>重置旧存档并启用保存</button>}
+          </div>
+        )}
+      </div>
+      <div className="setup-ledger__footer">
+        <span>{challenge ? `${challenge.roundLimit} 手 · 目标 ${challenge.targetChips}` : selectedRulesCopy.name}</span>
+        <button
+          type="button"
+          className="rule-ledger__enter"
+          onClick={() => choice === "classic" ? onStartClassic(rules, assistEnabled) : onStartChallenge(choice, assistEnabled)}
+        >
+          {challenge ? `开始「${challenge.name}」` : "入座经典牌桌"}<span aria-hidden="true">→</span>
+        </button>
+      </div>
     </article>
   );
 }

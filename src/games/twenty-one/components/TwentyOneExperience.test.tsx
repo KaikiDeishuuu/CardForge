@@ -1,6 +1,6 @@
 /* @vitest-environment jsdom */
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GamePersistenceHandle } from "../../../core/games/types";
 import { SoundProvider } from "../../../shared/audio/SoundProvider";
@@ -116,6 +116,7 @@ function renderExperience(root: TwentyOneRootState) {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   window.localStorage.clear();
   vi.restoreAllMocks();
 });
@@ -148,9 +149,22 @@ describe("Twenty One setup and table controls", () => {
     expect(onStartChallenge).toHaveBeenCalledWith("warmup", false);
 
     fireEvent.click(classic);
+    fireEvent.click(screen.getByText("调整房规"));
     expect(screen.getAllByRole("combobox")).toHaveLength(4);
     fireEvent.click(screen.getByRole("button", { name: /入座经典牌桌/ }));
     expect(onStartClassic).toHaveBeenCalledWith(STANDARD_SIX_RULES, false);
+  });
+
+  it("moves focus to the table tools after leaving setup", () => {
+    render(
+      <SoundProvider>
+        <TwentyOneExperience onExit={vi.fn()} />
+      </SoundProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "入座经典牌桌" }));
+
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "更多牌桌选项" }));
   });
 
   it("blocks writes and offers an explicit reset for an unreadable restored save", async () => {
@@ -238,18 +252,32 @@ describe("Twenty One setup and table controls", () => {
 describe("Twenty One player presentation and assistance", () => {
   it("renders a progress rail and the full desktop multi-hand container", () => {
     const hands = [
-      hand("hand-1", [card("10", "multi-1a"), card("8", "multi-1b")], "stood"),
-      hand("hand-2", [card("8", "multi-2a"), card("3", "multi-2b")]),
-      hand("hand-3", [card("10", "multi-3a"), card("K", "multi-3b")], "busted"),
+      hand("hand-1", [card("8", "multi-1a"), card("3", "multi-1b")]),
+      hand("hand-2", [card("8", "multi-2a"), card("2", "multi-2b")]),
+      hand("hand-3", [card("10", "multi-3a"), card("K", "multi-3b"), card("2", "multi-3c")], "busted"),
     ];
-    const { container } = render(<PlayerHands hands={hands} activeHandIndex={1} />);
+    const { container, rerender } = render(<PlayerHands hands={hands} activeHandIndex={0} />);
 
     const rail = screen.getByRole("list", { name: "玩家手牌进度" });
     expect(within(rail).getAllByRole("listitem")).toHaveLength(3);
     expect(container.querySelector(".player-hands-grid--3")).not.toBeNull();
-    expect(screen.getByLabelText(/手牌 1，18 点，已停牌/)).toBeTruthy();
-    expect(screen.getByLabelText(/手牌 2，11 点，行动中/).classList.contains("is-active")).toBe(true);
-    expect(screen.getByLabelText(/手牌 3，20 点，爆牌/)).toBeTruthy();
+    expect(screen.getByLabelText(/手牌 1，11 点，行动中/).classList.contains("is-active")).toBe(true);
+    expect(screen.getByLabelText(/手牌 2，10 点，等待行动/)).toBeTruthy();
+    expect(screen.getByLabelText(/手牌 3，22 点，爆牌/)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /查看第 2 手牌，10 点，等待行动/ }));
+    expect(screen.getByLabelText(/手牌 2，10 点，等待行动/).classList.contains("is-current")).toBe(true);
+
+    const updatedHands = [
+      { ...hands[0], cards: [...hands[0].cards, card("2", "multi-1-hit")] },
+      hands[1],
+      hands[2],
+    ];
+    rerender(<PlayerHands hands={updatedHands} activeHandIndex={0} latestCardId="test-multi-1-hit" />);
+
+    expect(screen.getByLabelText(/手牌 1，13 点，行动中/).classList.contains("is-current")).toBe(true);
+    expect(screen.getByRole("button", { name: /查看第 1 手牌，13 点，行动中/ }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: /查看第 2 手牌，10 点，等待行动/ }).getAttribute("aria-pressed")).toBe("false");
   });
 
   it("keeps assistance absent when disabled, then only highlights a move when requested", async () => {
@@ -278,13 +306,15 @@ describe("Twenty One player presentation and assistance", () => {
     expect(persisted.activeSession?.assisted).toBe(true);
   });
 
-  it("offers a repeat-bet shortcut and keeps the remembered amount after betting", async () => {
+  it("only offers a non-duplicated repeat-bet shortcut after a bet has been remembered", async () => {
     const deck = Array.from({ length: 320 }, (_, index) => card("2", `repeat-deck-${index}`, "clubs"));
     const defaultView = renderExperience(classicRoot(bettingTable({ deck })));
-    expect(screen.getByRole("button", { name: "重复上一注 25" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /重复上一注/ })).toBeNull();
+    expect(screen.getAllByRole("button", { name: /压 \d+ 枚筹码/ })).toHaveLength(4);
     defaultView.unmount();
 
     const { save } = renderExperience(rememberBet(classicRoot(bettingTable({ deck })), 50));
+    expect(screen.queryByRole("button", { name: "压 50 枚筹码" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "重复上一注 50" }));
 
     await waitFor(() => {
@@ -292,5 +322,53 @@ describe("Twenty One player presentation and assistance", () => {
       expect(persisted.preferences.lastBet).toBe(50);
       expect(persisted.activeSession?.table.phase).toBe("player-turn");
     });
+  });
+
+  it("keeps the settled cards visible briefly before presenting the result", async () => {
+    renderExperience(classicRoot(activeTable()));
+
+    fireEvent.click(screen.getByRole("button", { name: "投降" }));
+
+    expect(screen.queryByRole("dialog", { name: "庄家守住牌桌" })).toBeNull();
+    expect(screen.getByRole("region", { name: "二十一刻牌桌" }).textContent).toContain("庄家");
+    const result = await screen.findByRole("dialog", { name: "庄家守住牌桌" }, { timeout: 1_500 });
+    fireEvent.click(within(result).getByRole("button", { name: /下一手/ }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "更多牌桌选项" }));
+  });
+
+  it("restarts the full settlement delay after an information overlay closes", () => {
+    vi.useFakeTimers();
+    renderExperience(classicRoot(activeTable()));
+
+    fireEvent.click(screen.getByRole("button", { name: "投降" }));
+    fireEvent.click(screen.getByRole("button", { name: "更多牌桌选项" }));
+    act(() => vi.advanceTimersByTime(1_000));
+    expect(screen.queryByRole("dialog", { name: "庄家守住牌桌" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭更多选项" }));
+    act(() => vi.advanceTimersByTime(719));
+    expect(screen.queryByRole("dialog", { name: "庄家守住牌桌" })).toBeNull();
+
+    act(() => vi.advanceTimersByTime(1));
+    expect(screen.getByRole("dialog", { name: "庄家守住牌桌" })).toBeTruthy();
+  });
+
+  it("uses one mobile-friendly tools entry and makes the table inert behind overlays", () => {
+    renderExperience(classicRoot(activeTable()));
+
+    fireEvent.click(screen.getByRole("button", { name: "更多牌桌选项" }));
+    const tools = screen.getByRole("dialog", { name: "牌桌选项" });
+    expect(within(tools).getByRole("button", { name: /牌局速度/ })).toBeTruthy();
+    expect(within(tools).getByRole("button", { name: /关闭声音|开启声音/ })).toBeTruthy();
+    expect(document.querySelector(".twenty-one-surface")?.hasAttribute("inert")).toBe(true);
+
+    const more = screen.getByRole("button", { name: "更多牌桌选项" });
+    fireEvent.click(within(tools).getByRole("button", { name: /牌桌册/ }));
+    const ledgerDialog = screen.getByRole("dialog", { name: "牌桌册" });
+    expect(ledgerDialog).toBeTruthy();
+    expect(document.querySelector(".twenty-one-surface")?.hasAttribute("inert")).toBe(true);
+
+    fireEvent.click(within(ledgerDialog).getByRole("button", { name: "关闭牌桌册" }));
+    expect(document.activeElement).toBe(more);
   });
 });

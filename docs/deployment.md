@@ -12,7 +12,7 @@ CardForge 是纯静态 SPA（React + Vite，无后端、无数据库，存档只
 
 ```text
 Cloudflare（橙云代理）
-  └─ 45.129.8.205
+  └─ <服务器地址>
        ├─ :80   nginx http  → ACME 校验 + 301 跳 https
        └─ :443  nginx stream 按 SNI 分流 (/etc/nginx/stream.d/reality-stream.conf)
                   ├─ jenny.wulab.tech → 127.0.0.1:8444
@@ -28,7 +28,7 @@ Cloudflare（橙云代理）
 站点文件采用 release + 符号链接：
 
 ```text
-/var/www/cardforge/
+<SITE_ROOT>/
   releases/<commit sha>/    每次部署一份，保留最近 5 个
   current -> releases/...   nginx 的 root 指向它
 ```
@@ -59,11 +59,11 @@ push 到 main
 | Secret | 值 |
 | --- | --- |
 | `DEPLOY_SSH_KEY` | 部署私钥全文（本机 `~/.ssh/cardforge_deploy`） |
-| `DEPLOY_HOST` | `45.129.8.205` |
-| `DEPLOY_USER` | `deploy` |
-| `DEPLOY_PORT` | `29637` |
-| `DEPLOY_PATH` | `/var/www/cardforge` |
-| `DEPLOY_KNOWN_HOSTS` | `ssh-keyscan -p 29637 45.129.8.205` 的输出 |
+| `DEPLOY_HOST` | `<服务器地址>` |
+| `DEPLOY_USER` | `<部署用户名>` |
+| `DEPLOY_PORT` | `<SSH_PORT>` |
+| `DEPLOY_PATH` | `<SITE_ROOT>` |
+| `DEPLOY_KNOWN_HOSTS` | `ssh-keyscan -p <SSH_PORT> <服务器地址>` 的输出 |
 | `DEPLOY_SITE_URL` | `https://game.farc.dev` |
 
 `DEPLOY_KNOWN_HOSTS` 用于固定服务器主机密钥；没有它就只能关掉 `StrictHostKeyChecking`，
@@ -80,14 +80,14 @@ push 到 main
 sudo ./server-setup.sh game.farc.dev "<部署公钥>"
 ```
 
-`deploy/nginx/` 下的两个配置是线上实际生效的副本。
+`deploy/nginx/` 下的三个配置（HTTP 跳转、安全头 include、TLS server）是线上实际生效的副本。
 
 ## 回滚
 
 把 `current` 指回上一个 release 即可，无需重新构建或 reload nginx：
 
 ```bash
-cd /var/www/cardforge
+cd <SITE_ROOT>
 ls -1t releases/
 ln -sfn releases/<目标 sha> current.tmp && mv -Tf current.tmp current
 ```
@@ -115,17 +115,17 @@ done
 | --- | --- |
 | `Host key verification failed` | `DEPLOY_KNOWN_HOSTS` 与实际主机密钥不符。重新 `ssh-keyscan` 更新 secret。 |
 | `Permission denied (publickey)` | 公钥没进 `deploy` 的 `authorized_keys`，或 `~/.ssh` 权限不对（须 700/600）。 |
-| 站点仍是旧版本 | 看 `readlink /var/www/cardforge/current`；Cloudflare 可能缓存了 `index.html`，可在 CF 后台清缓存。 |
+| 站点仍是旧版本 | 看 `readlink <SITE_ROOT>/current`；Cloudflare 可能缓存了 `index.html`，可在 CF 后台清缓存。 |
 | 证书签发/续期失败 | Cloudflare 橙云下 HTTP-01 依赖 `:80` 可达。确认 `/.well-known/acme-challenge/` 未被「Always Use HTTPS」拦截。 |
 | 某个域名 TLS 握手拿到错误证书 | SNI map 缺条目或 upstream 端口写错，回退到了 `default`。 |
 | 页面白屏、控制台报 chunk 加载失败 | 用户停留在旧 HTML 而其引用的 chunk 已被清理。刷新即可；`index.html` 设了 `no-cache` 正是为压缩这个窗口。 |
 
 ## Cloudflare 注意事项
 
-- 域名开着**橙云代理**，回源是 45.129.8.205。SSL 模式需为 Full 或 Full (strict)，
+- 域名开着**橙云代理**，回源是 `<服务器地址>`。SSL 模式需为 Full 或 Full (strict)，
   Flexible 会与 `:80` 的 301 形成重定向循环。
 - **建议关闭该主机名的 Rocket Loader。** 它会把 `<script type="module">` 改写成
-  `type="<随机串>-module"` 并注入内联脚本。目前实测四款游戏的动态 chunk 仍能正常
+  `type="<随机串>-module"` 并注入内联脚本。目前实测五款游戏的动态 chunk 仍能正常
   加载，但这是对 ES 模块的侵入式改写，对已经过 Vite 优化的产物没有收益，属于随时
   可能咬人的隐患。
 - 站点 CSP 的 `style-src` 带 `'unsafe-inline'`：本站用 `style={{ "--game-accent": ... }}`
@@ -133,7 +133,7 @@ done
 
 ## 安全边界
 
-- 部署私钥无 passphrase（CI 必须非交互），因此它只对应无 sudo、只能写 `/var/www/cardforge`
+- 部署私钥无 passphrase（CI 必须非交互），因此它只对应无 sudo、只能写 `<SITE_ROOT>`
   的 `deploy` 用户，且在 `authorized_keys` 中以 `restrict` 收紧（关闭端口转发、agent
   转发、PTY、X11）。已验证该账号无法写 `/etc/nginx`。
 - 仓库为 public，但 deploy job 只在 `push` 到 `main` 时运行；fork 发起的 PR 拿不到 secrets。

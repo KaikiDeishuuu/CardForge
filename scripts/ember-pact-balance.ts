@@ -182,6 +182,17 @@ const report = {
       Object.fromEntries(Object.entries(plays).sort((left, right) => right[1] - left[1])),
     ]),
   ),
+  limits: {
+    maxUnfinishedRate: 0.01,
+  },
 };
 
 console.log(JSON.stringify(report, null, 2));
+
+const unfinishedRate = wins.unfinished / matchCount;
+if (unfinishedRate > report.limits.maxUnfinishedRate) {
+  console.error(
+    `Ember Pact baseline exceeded unfinished-match limit: ${unfinishedRate.toFixed(3)} > ${report.limits.maxUnfinishedRate}.`,
+  );
+  process.exitCode = 1;
+}

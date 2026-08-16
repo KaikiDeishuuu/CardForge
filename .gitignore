@@ -5,3 +5,5 @@ dist
 *.tsbuildinfo
 playwright-report
 test-results
+
+.pw-browsers

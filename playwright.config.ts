@@ -69,9 +69,11 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "npm run dev -- --host 127.0.0.1 --port 4173",
+    // Browser tests target the production bundle in dist/, the same artifact
+    // CI uploads and deploys. Run `npm run build` first (CI already does).
+    command: "npm run preview -- --host 127.0.0.1 --port 4173",
     url: "http://127.0.0.1:4173",
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 120_000,
   },
 });

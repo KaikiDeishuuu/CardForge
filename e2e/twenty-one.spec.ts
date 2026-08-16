@@ -52,7 +52,7 @@ test("setup 可选择挑战与房规，开桌后房规只读", async ({ page }, 
   const assertNoPageErrors = collectPageErrors(page);
   await page.goto("/?game=twenty-one");
 
-  const setup = page.getByRole("dialog", { name: /选择这一席/ });
+  const setup = page.getByRole("dialog", { name: "选择玩法" });
   await expect(setup).toBeVisible();
   await expect(setup.getByRole("radio", { name: /经典牌桌/ })).toBeFocused();
 
@@ -62,13 +62,14 @@ test("setup 可选择挑战与房规，开桌后房规只读", async ({ page }, 
   await expect(setup.getByRole("button", { name: /开始「热身十手」/ })).toBeVisible();
 
   await setup.getByRole("radio", { name: /经典牌桌/ }).click();
+  await setup.getByText("调整房规").click();
   await setup.getByRole("radio", { name: /单副牌/ }).click();
   await expect(setup.getByLabel("牌靴副数")).toHaveValue("1");
   await expect(setup.getByLabel("庄家软 17")).toHaveValue("hit");
   await expect(setup.getByLabel("允许迟投降")).not.toBeChecked();
   await setup.getByRole("button", { name: "入座经典牌桌" }).click();
 
-  await page.getByRole("button", { name: "打开牌桌册" }).click();
+  await page.getByRole("button", { name: "牌桌册", exact: true }).click();
   const ledger = page.getByRole("dialog", { name: "牌桌册" });
   await ledger.getByRole("tab", { name: "房规" }).click();
   const houseRules = ledger.getByRole("tabpanel");
@@ -106,7 +107,7 @@ test("完整结算会累计统计并进入保留筹码的下一手", async ({ pa
 
   await page.reload();
   await expect(page.locator(".tw-restore-notice")).toHaveText("已恢复经典牌桌第 2 手");
-  await page.getByRole("button", { name: "打开牌桌册" }).click();
+  await page.getByRole("button", { name: "牌桌册", exact: true }).click();
   const ledger = page.getByRole("dialog", { name: "牌桌册" });
   await ledger.getByRole("tab", { name: "档案" }).click();
   const archive = ledger.getByRole("tabpanel");
@@ -131,7 +132,7 @@ test("分牌创建两手并能从存档恢复当前行动", async ({ page }, tes
 
   await expect(page.locator(".hand-rail > li")).toHaveCount(2);
   await expect(page.getByRole("region", { name: /手牌 1，11 点，行动中/ })).toBeVisible();
-  await expect(page.getByRole("region", { name: /手牌 2，10 点，行动中/ })).toBeVisible();
+  await expect(page.getByRole("region", { name: /手牌 2，10 点，等待行动/ })).toBeVisible();
   await expect(page.locator(".chip-stack b")).toHaveText("450");
   await expect(page.locator(".chip-stack em")).toHaveText("押 50");
   await expect.poll(() => savedTableValue(page, "handCount")).toBe(2);
@@ -140,6 +141,28 @@ test("分牌创建两手并能从存档恢复当前行动", async ({ page }, tes
   await expect(page.locator(".tw-restore-notice")).toHaveText("已恢复经典牌桌第 1 手");
   await expect(page.locator(".hand-rail > li")).toHaveCount(2);
   await expect(page.getByRole("button", { name: /^停牌/ })).toBeEnabled();
+  assertNoPageErrors();
+});
+
+test("手机回看等待手牌后，下一次行动恢复真实行动手", async ({ page }, testInfo) => {
+  desktopOnly(testInfo.project.name);
+  const assertNoPageErrors = collectPageErrors(page);
+  await installClassicBettingSave(page, ["8", "6", "8", "10", "3", "2", "2"]);
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto("/?game=twenty-one");
+  await page.getByRole("button", { name: "压 25 枚筹码" }).click();
+  await page.getByRole("button", { name: "分牌", exact: true }).click();
+
+  const waitingHand = page.locator('.tw-player-hand[aria-label="手牌 2，10 点，等待行动"]');
+  await expect(page.locator(".hand-rail small").first()).toHaveCSS("font-size", "12px");
+  await page.getByRole("button", { name: /查看第 2 手牌，10 点，等待行动/ }).click();
+  await expect(waitingHand).toBeVisible();
+
+  await page.getByRole("button", { name: /^要牌/ }).click();
+  await expect(page.getByRole("region", { name: "手牌 1，13 点，行动中" })).toBeVisible();
+  await expect(waitingHand).toBeHidden();
+  await expect(page.getByRole("button", { name: /查看第 1 手牌，13 点，行动中/ })).toHaveAttribute("aria-pressed", "true");
+  await expectNoHorizontalOverflow(page);
   assertNoPageErrors();
 });
 
@@ -160,7 +183,7 @@ test("保险按 2:1 赔付并进入长期统计", async ({ page }, testInfo) => 
   await expect(page.locator(".chip-stack b")).toHaveText("500");
   await result.getByRole("button", { name: /下一手/ }).click();
 
-  await page.getByRole("button", { name: "打开牌桌册" }).click();
+  await page.getByRole("button", { name: "牌桌册", exact: true }).click();
   const ledger = page.getByRole("dialog", { name: "牌桌册" });
   await ledger.getByRole("tab", { name: "档案" }).click();
   const archive = ledger.getByRole("tabpanel");
@@ -215,6 +238,88 @@ test("多手牌桌在手机、笔记本与桌面均无横向溢出", async ({ pa
 
   await expect(page.getByRole("region", { name: "二十一刻牌桌" })).toBeVisible();
   await expect(page.locator(".hand-rail > li")).toHaveCount(2);
+  await expectNoHorizontalOverflow(page);
+  assertNoPageErrors();
+});
+
+test("开局主操作在紧凑手机首屏始终可见", async ({ page }, testInfo) => {
+  desktopOnly(testInfo.project.name);
+  const assertNoPageErrors = collectPageErrors(page);
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto("/?game=twenty-one");
+
+  const setup = page.getByRole("dialog", { name: "选择玩法" });
+  const start = setup.getByRole("button", { name: "入座经典牌桌" });
+  await expect(start).toBeVisible();
+  const startBox = await start.boundingBox();
+  expect(startBox).not.toBeNull();
+  expect(startBox!.y + startBox!.height).toBeLessThanOrEqual(568);
+  await expect(setup.getByRole("combobox")).toHaveCount(0);
+
+  await setup.getByText("调整房规").click();
+  await expect(setup.getByLabel("牌靴副数")).toBeVisible();
+  await expect(start).toBeVisible();
+  assertNoPageErrors();
+});
+
+test("行动牌桌在 320 短屏与手机横屏均保持单视口布局", async ({ page }, testInfo) => {
+  desktopOnly(testInfo.project.name);
+  const assertNoPageErrors = collectPageErrors(page);
+  await installClassicBettingSave(page, ["8", "6", "8", "10", "3", "2"]);
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto("/?game=twenty-one");
+  await page.getByRole("button", { name: "压 25 枚筹码" }).click();
+  await page.getByRole("button", { name: "分牌", exact: true }).click();
+
+  async function expectSingleViewport() {
+    const geometry = await page.evaluate(() => {
+      const rect = (selector: string) => {
+        const element = document.querySelector(selector);
+        if (!element) throw new Error(`Missing ${selector}`);
+        const box = element.getBoundingClientRect();
+        return { top: box.top, right: box.right, bottom: box.bottom, left: box.left };
+      };
+      return {
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        documentHeight: document.documentElement.scrollHeight,
+        table: rect(".twenty-one-table"),
+        dock: rect(".decision-dock"),
+        dealer: rect(".dealer-zone"),
+        center: rect(".table-center"),
+        player: rect(".player-zone"),
+      };
+    });
+    expect(geometry.documentHeight).toBeLessThanOrEqual(geometry.viewport.height + 1);
+    expect(geometry.table.bottom).toBeLessThanOrEqual(geometry.dock.top + 1);
+    expect(geometry.dock.bottom).toBeLessThanOrEqual(geometry.viewport.height + 1);
+    return geometry;
+  }
+
+  await expectSingleViewport();
+  const touchControls = [
+    ["返回游戏大厅", page.getByRole("button", { name: "返回游戏大厅", exact: true })],
+    ["更多牌桌选项", page.getByRole("button", { name: "更多牌桌选项", exact: true })],
+    ["停牌", page.getByRole("button", { name: /^停牌/ })],
+    ["要牌", page.getByRole("button", { name: /^要牌/ })],
+    ["加倍", page.getByRole("button", { name: "加倍", exact: true })],
+    ["分牌", page.getByRole("button", { name: "分牌", exact: true })],
+    ["投降", page.getByRole("button", { name: "投降", exact: true })],
+  ] as const;
+  for (const [name, control] of touchControls) {
+    const box = await control.boundingBox();
+    expect(box, `${name} 应有可见命中区`).not.toBeNull();
+    expect(box!.width, `${name} 命中区宽度`).toBeGreaterThanOrEqual(44);
+    expect(box!.height, `${name} 命中区高度`).toBeGreaterThanOrEqual(44);
+  }
+
+  await page.getByRole("button", { name: /查看第 2 手牌/ }).click();
+  await expect(page.getByRole("region", { name: /手牌 2，10 点，等待行动/ })).toBeVisible();
+
+  await page.setViewportSize({ width: 844, height: 390 });
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  const landscape = await expectSingleViewport();
+  expect(landscape.dealer.right).toBeLessThanOrEqual(landscape.center.left + 1);
+  expect(landscape.center.right).toBeLessThanOrEqual(landscape.player.left + 1);
   await expectNoHorizontalOverflow(page);
   assertNoPageErrors();
 });

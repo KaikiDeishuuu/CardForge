@@ -2,7 +2,13 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import type { GameRuntimeProps } from "../../core/games/types";
 import { useSound } from "../../shared/audio/SoundProvider";
 import { playbackDelay, usePlaybackSpeed } from "../../shared/settings/usePlaybackSpeed";
-import { useModalFocus } from "../../shared/ui/useModalFocus";
+import {
+  Dialog,
+  GameShell,
+  GameTopBar,
+  ToolMenu,
+  type GameToolAction,
+} from "../../shared/ui/GameShell";
 import { GuandanCardView } from "./components/GuandanCardView";
 import { chooseAiMove, getAiThinkingDuration } from "./domain/ai";
 import {
@@ -23,9 +29,21 @@ import { GUANDAN_SAVE_SCHEMA_VERSION, restoreGuandanState, serializeGuandanState
 import type { AiMove, GuandanDifficulty, GuandanPlayer, GuandanState, PlayerId } from "./domain/types";
 import "./guandan.css";
 
+const MIN_AI_PRESENTATION_MS = 600;
+
 function Seat({ player, active, lastActorId }: { player: GuandanPlayer; active: boolean; lastActorId?: PlayerId }) {
+  const seatStatus = player.finishedPlace
+    ? `第 ${player.finishedPlace} 名完成`
+    : active
+      ? "正在行动"
+      : "等待行动";
+
   return (
-    <div className={`gd-seat gd-seat--${player.id} gd-seat--${player.team} ${active ? "is-active" : ""}`}>
+    <div
+      className={`gd-seat gd-seat--${player.id} gd-seat--${player.team} ${active ? "is-active" : ""}`}
+      role="group"
+      aria-label={`${player.displayName}，${player.team === "vermillion" ? "朱雀方" : "青岳方"}，剩余 ${player.hand.length} 张，${seatStatus}`}
+    >
       <span className="gd-seat__avatar" aria-hidden="true">{player.displayName.slice(0, 1)}</span>
       <span className="gd-seat__copy">
         <small>{player.team === "vermillion" ? "朱雀方" : "青岳方"}</small>
@@ -33,7 +51,7 @@ function Seat({ player, active, lastActorId }: { player: GuandanPlayer; active: 
       </span>
       <span className="gd-seat__count">{player.hand.length}<small>张</small></span>
       {player.finishedPlace && <b className="gd-seat__place">第 {player.finishedPlace} 名</b>}
-      {lastActorId === player.id && <i className="gd-seat__pulse" />}
+      {lastActorId === player.id && <i className="gd-seat__pulse" aria-hidden="true" />}
     </div>
   );
 }
@@ -63,17 +81,24 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
   const [saveBlocked, setSaveBlocked] = useState(unreadableRestoredSave);
   const [saveUnavailable, setSaveUnavailable] = useState(false);
   const [selectedIds, setSelectedIds] = useState<readonly string[]>([]);
+  const [preferredHandTabStopId, setPreferredHandTabStopId] = useState<string>();
   const [showRules, setShowRules] = useState(restored === undefined);
   const [showLog, setShowLog] = useState(false);
+  const [showTools, setShowTools] = useState(false);
   const [autoPilot, setAutoPilot] = useState(false);
   const [hintText, setHintText] = useState<string>();
   const stateRef = useRef(state);
+  const handRowsRef = useRef<HTMLDivElement>(null);
+  const restoreHandFocus = useRef(false);
   const automationGeneration = useRef(0);
   const { enabled: soundEnabled, toggle: toggleSound, play: playSound } = useSound();
   const { speed: playbackSpeed, cycle: cyclePlaybackSpeed } = usePlaybackSpeed();
 
   const human = getPlayer(state, "human");
   const active = getPlayer(state, state.activePlayerId);
+  const handTabStopId = human.hand.some((card) => card.id === preferredHandTabStopId)
+    ? preferredHandTabStopId
+    : human.hand[0]?.id;
   const selectedCards = useMemo(
     () => human.hand.filter((card) => selectedIds.includes(card.id)),
     [human.hand, selectedIds],
@@ -82,11 +107,14 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
     () => classifyCombo(selectedCards, state.levelRank),
     [selectedCards, state.levelRank],
   );
-  const humanCanAct = state.status === "playing" && state.activePlayerId === "human" && !autoPilot && !showRules && !showLog;
-  // Derived, not stored: a seat is thinking exactly while its move is pending.
+  const informationOpen = showRules || showLog || showTools;
+  const humanCanAct = state.status === "playing"
+    && state.activePlayerId === "human"
+    && !autoPilot
+    && !informationOpen;
   const automate = state.status === "playing"
     && (active.controller === "ai" || (active.id === "human" && autoPilot));
-  const aiThinking = automate && !showRules && !showLog;
+  const aiThinking = automate && !informationOpen;
   const playError = selectedIds.length > 0 ? getPlayError(state, "human", selectedIds) : undefined;
   const handMidpoint = Math.ceil(human.hand.length / 2);
   const handRows = [human.hand.slice(0, handMidpoint), human.hand.slice(handMidpoint)];
@@ -96,6 +124,28 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
   }, [state]);
 
   useEffect(() => {
+    if (!hintText || selectedIds.length === 0) return;
+    const firstSelected = handRowsRef.current?.querySelector<HTMLElement>('button.gd-card[aria-pressed="true"]');
+    firstSelected?.scrollIntoView?.({ block: "nearest", inline: "center" });
+  }, [hintText, selectedIds]);
+
+  useEffect(() => {
+    if (state.status === "finished") {
+      restoreHandFocus.current = false;
+      return;
+    }
+    if (!humanCanAct || !restoreHandFocus.current) return;
+    const focused = document.activeElement;
+    const focusWasLost = focused === document.body
+      || focused === document.documentElement
+      || (focused instanceof HTMLButtonElement && focused.disabled);
+    if (focusWasLost) {
+      handRowsRef.current?.querySelector<HTMLButtonElement>("button.gd-card:not(:disabled)")?.focus();
+    }
+    restoreHandFocus.current = false;
+  }, [humanCanAct, state.status]);
+
+  useEffect(() => {
     if (!aiThinking) return;
 
     const scheduledState = state;
@@ -103,13 +153,11 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
     const generation = automationGeneration.current + 1;
     automationGeneration.current = generation;
     const thinkingDelay = Math.max(
-      240,
+      MIN_AI_PRESENTATION_MS,
       playbackDelay(getAiThinkingDuration(state, expectedActor), playbackSpeed),
     );
     const timer = window.setTimeout(() => {
       if (automationGeneration.current !== generation || stateRef.current !== scheduledState) return;
-      // Decided once and reused: scanning a 27-card hand for legal combos is the
-      // most expensive thing this table does per turn.
       const move = chooseAiMove(scheduledState, expectedActor, scheduledState.difficulty);
       if (automationGeneration.current !== generation || stateRef.current !== scheduledState) return;
       const nextState = applyMove(scheduledState, expectedActor, move);
@@ -130,17 +178,12 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
     if (state.status === "finished") playSound(state.winner === human.team ? "win" : "tap");
   }, [human.team, playSound, state.status, state.winner]);
 
-  // 连续升级对局跨刷新存续：下一局、级别与胜负都随状态落盘；
-  // 只有整场打过 A（或玩家主动再来一场）才清除旧档。
   useEffect(() => {
     if (!persistence || saveBlocked) return;
     if (state.match.champion) {
       persistence.clear();
       return;
     }
-    // 没有任何进展（revision 0）且此前没有存档时不落盘：避免把
-    // 「进过牌桌但什么都没做」也当作可续玩的对局。下一局与再来一场
-    // 产生的新局在有旧档时会在这里直接覆盖它。
     if (state.revision === 0 && !persistence.restored) return;
     const saved = persistence.save(GUANDAN_SAVE_SCHEMA_VERSION, state.revision, serializeGuandanState(state));
     if (saved) {
@@ -160,6 +203,7 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
 
   function toggleCard(id: string) {
     if (!humanCanAct) return;
+    setPreferredHandTabStopId(id);
     setSelectedIds((current) => current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id]);
     setHintText(undefined);
     playSound("tap");
@@ -167,6 +211,8 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
 
   function playSelection() {
     if (!humanCanAct || playError || selectedIds.length === 0) return;
+    restoreHandFocus.current = Boolean((document.activeElement as HTMLElement | null)?.closest(".gd-hand-dock"));
+    setPreferredHandTabStopId(undefined);
     setState((current) => playCards(current, "human", selectedIds));
     setSelectedIds([]);
     setHintText(undefined);
@@ -175,6 +221,7 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
 
   function pass() {
     if (!humanCanAct || !canPass(state, "human")) return;
+    restoreHandFocus.current = Boolean((document.activeElement as HTMLElement | null)?.closest(".gd-hand-dock"));
     setState((current) => passTurn(current, "human"));
     setSelectedIds([]);
     setHintText(undefined);
@@ -198,7 +245,7 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
   function moveHandFocus(event: KeyboardEvent<HTMLDivElement>) {
     if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
 
-    const cards = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button.gd-card"));
+    const cards = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button.gd-card:not(:disabled)"));
     const currentIndex = cards.indexOf(document.activeElement as HTMLButtonElement);
     if (currentIndex < 0) return;
 
@@ -242,7 +289,8 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
     if (nextIndex === currentIndex) return;
 
     event.preventDefault();
-    cards[nextIndex].focus({ preventScroll: true });
+    setPreferredHandTabStopId(cards[nextIndex].dataset.cardId);
+    cards[nextIndex].focus();
   }
 
   function clearTurnUi() {
@@ -251,12 +299,14 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
   }
 
   function nextDeal() {
+    setPreferredHandTabStopId(undefined);
     setState((current) => startNextDeal(current));
     clearTurnUi();
     playSound("card");
   }
 
   function restart() {
+    setPreferredHandTabStopId(undefined);
     setState(createInitialState(Math.random, state.difficulty));
     setAutoPilot(false);
     clearTurnUi();
@@ -274,7 +324,7 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
       ? "本机存档不可用，本次进度只在当前页面保留。"
       : undefined;
   const tableMessage = aiThinking
-    ? `${active.displayName}正在理牌`
+    ? active.id === "human" && autoPilot ? "托管正在替你出牌" : `${active.displayName}思考中`
     : state.lastAction?.text ?? "等待出牌。";
   const opposingPlayers = state.players.filter((player) => player.id === "east" || player.id === "west");
   const partner = getPlayer(state, "partner");
@@ -282,204 +332,166 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
   const dealResult = match.lastResult;
   const champion = match.champion;
   const resultWon = state.winner === human.team;
-  const rulesModalRef = useModalFocus({
-    active: showRules,
-    initialFocus: ".gd-rule-board__enter",
-    onDismiss: () => setShowRules(false),
-  });
-  const resultModalRef = useModalFocus({
-    active: state.status === "finished" && Boolean(state.winner) && !showRules,
-    initialFocus: ".gd-result-board footer button",
-  });
+  const resultOpen = state.status === "finished" && Boolean(state.winner) && Boolean(dealResult) && !showRules;
+  const overlayOpen = informationOpen || resultOpen;
+  const canClearSelection = humanCanAct && selectedIds.length > 0;
+  const playActionLabel = selectedCombo ? `出${selectedCombo.label} · ${selectedIds.length} 张` : "出牌";
+  const gameStatus = state.status === "finished"
+    ? "本局已结束"
+    : informationOpen
+      ? "牌局已暂停 · 关闭面板继续"
+      : aiThinking
+        ? active.id === "human" && autoPilot ? "托管正在替你思考" : `${active.displayName}思考中`
+        : state.activePlayerId === "human"
+          ? "轮到你出牌"
+          : `${active.displayName}的行动`;
+  const statusText = saveBlocked
+    ? `旧存档未读取 · ${gameStatus}`
+    : saveUnavailable
+      ? `本机存档不可用 · ${gameStatus}`
+      : gameStatus;
 
-  return (
-    <main className="guandan-screen">
-      <header className="guandan-topbar">
-        <button type="button" className="gd-round-button" onClick={onExit} aria-label="返回游戏大厅">←</button>
-        <div className="guandan-title">
-          <small>CARDFORGE · TABLE 003</small>
-          <strong>掼蛋 · 升级赛</strong>
-        </div>
-        <div className="guandan-tools">
-          <button type="button" onClick={() => setShowRules(true)} aria-label="查看规则">?</button>
-          <button type="button" onClick={() => setShowLog((value) => !value)} aria-label="查看牌局记录">≡</button>
-          <button type="button" onClick={cyclePlaybackSpeed} aria-label={`AI 速度 ${playbackSpeed}×`} title={`AI 速度 ${playbackSpeed}×`}>{playbackSpeed}×</button>
-          <button type="button" onClick={toggleSound} aria-label={soundEnabled ? "关闭声音" : "开启声音"}>{soundEnabled ? "♪" : "×"}</button>
-        </div>
-      </header>
+  const toolActions: readonly GameToolAction[] = [
+    {
+      id: "log",
+      label: "查看牌局记录",
+      description: "查看本局最近行动",
+      icon: "≡",
+      onSelect: () => setShowLog(true),
+    },
+    {
+      id: "rules",
+      label: "查看规则",
+      description: "牌型、升级与本桌惯例",
+      icon: "?",
+      onSelect: () => setShowRules(true),
+    },
+    {
+      id: "speed",
+      label: `AI 节奏 · ${playbackSpeed}×`,
+      description: "切换行动演出速度",
+      icon: `${playbackSpeed}×`,
+      onSelect: cyclePlaybackSpeed,
+    },
+    {
+      id: "sound",
+      label: soundEnabled ? "声音 · 开" : "声音 · 关",
+      description: soundEnabled ? "点击关闭牌桌声音" : "点击开启牌桌声音",
+      icon: soundEnabled ? "♪" : "静",
+      pressed: soundEnabled,
+      onSelect: toggleSound,
+    },
+  ];
 
-      {saveWarning && !showRules && (
-        <div className="gd-save-warning" role="alert">
-          <span>{saveWarning}</span>
-          {saveBlocked && <button type="button" onClick={resetUnreadableSave}>重置旧存档并启用保存</button>}
-        </div>
-      )}
-
-      <div
-        className="gd-level-rail"
-        aria-label={`第 ${match.dealNumber} 局，打 ${teamName(match.attackingTeam)}的 ${state.levelRank}。朱雀方 ${match.levels.vermillion} 级，青岳方 ${match.levels.indigo} 级`}
-      >
-        <span>第 {match.dealNumber} 局 · 逢人配 ♥{state.levelRank}</span>
-        <div>{NUMBER_RANKS.map((rank) => <i key={rank} className={rank === state.levelRank ? "is-level" : ""}>{rank}</i>)}</div>
-        <strong className="gd-match-score">
-          {(["vermillion", "indigo"] as const).map((team) => (
-            <b
-              key={team}
-              className={`gd-match-score__team gd-match-score__team--${team} ${match.attackingTeam === team ? "is-attacking" : ""}`}
-            >
-              {team === "vermillion" ? "朱" : "青"}<i>{match.levels[team]}</i>
-            </b>
-          ))}
-        </strong>
-      </div>
-
-      <section className="gd-arena" aria-label="四人掼蛋牌桌">
-        <div className="gd-partner-axis" aria-hidden="true"><span>对 家 轴</span></div>
-        <Seat player={partner} active={state.activePlayerId === partner.id} lastActorId={state.lastAction?.actorId === "table" ? undefined : state.lastAction?.actorId} />
-        {opposingPlayers.map((player) => (
-          <Seat key={player.id} player={player} active={state.activePlayerId === player.id} lastActorId={state.lastAction?.actorId === "table" ? undefined : state.lastAction?.actorId} />
-        ))}
-
-        <div
-          className={`gd-trick ${state.trick?.combo.type === "bomb" ? "is-bomb" : ""}`}
-          aria-live="polite"
-          aria-busy={aiThinking}
-        >
-          <header>
-            <span><small>当前牌墩</small><strong>{state.trick?.combo.label ?? "等待领出"}</strong></span>
-            {state.trick && <b>{getPlayer(state, state.trick.actorId).displayName} · {state.trick.combo.cards.length} 张</b>}
-          </header>
-          <div className="gd-trick__cards">
-            {state.trick ? state.trick.combo.cards.map((card) => (
-              <GuandanCardView key={card.id} card={card} levelRank={state.levelRank} compact />
-            )) : <span className="gd-trick__empty">贯</span>}
+  const gameOverlay = (
+    <>
+      <ToolMenu open={showTools} title="牌桌选项" actions={toolActions} onClose={() => setShowTools(false)}>
+        {saveWarning && (
+          <div className="gd-save-warning gd-save-warning--menu" role="alert">
+            <span>{saveWarning}</span>
+            {saveBlocked && <button type="button" onClick={resetUnreadableSave}>重置旧存档并启用保存</button>}
           </div>
-          <p key={state.revision} className={aiThinking ? "is-thinking" : undefined}>
-            {tableMessage}
-            {aiThinking && <span className="gd-thinking-dots" aria-hidden="true"><i /><i /><i /></span>}
-          </p>
-        </div>
+        )}
+      </ToolMenu>
 
-        <div className={`gd-turn-flag gd-turn-flag--${active.team}`}>
-          <i />
-          <span>{state.status === "finished" ? "牌局结束" : `${active.displayName}的行动`}</span>
-        </div>
-      </section>
+      <Dialog
+        open={showLog}
+        title="牌局记录"
+        className="gd-log-dialog"
+        onClose={() => setShowLog(false)}
+        closeLabel="关闭牌局记录"
+        restoreFocus=".cf-game-topbar__more"
+      >
+        <ol className="gd-log-list">
+          {[...state.log].reverse().map((entry) => (
+            <li key={entry.id}><small>#{String(entry.id).padStart(2, "0")}</small><span>{entry.text}</span></li>
+          ))}
+        </ol>
+      </Dialog>
 
-      <section className="gd-hand-dock" aria-label="你的手牌" aria-describedby="gd-hand-keyboard-hint">
-        <header className="gd-hand-heading">
-          <span><small>朱雀方 · 南座</small><strong>你的手牌 <i>{human.hand.length}</i></strong></span>
-          <span className="gd-selection-status">
-            {hintText ?? (selectedIds.length === 0 ? "点选同型牌" : playError ?? `${selectedCombo?.label ?? "已选"} · ${selectedIds.length} 张`)}
-          </span>
+      <Dialog
+        open={showRules}
+        title="掼蛋 · 升级赛"
+        className="gd-rule-dialog"
+        onClose={() => setShowRules(false)}
+        closeLabel="关闭规则"
+        initialFocus=".gd-rule-board__enter"
+        restoreFocus=".cf-game-topbar__more"
+        footer={(
           <button
             type="button"
-            className={`gd-autoplay ${autoPilot ? "is-on" : ""}`}
-            onClick={() => { setAutoPilot((value) => !value); setSelectedIds([]); }}
+            className="gd-rule-board__enter"
+            onClick={() => { setShowRules(false); playSound("card"); }}
           >
-            {autoPilot ? "接管" : "托管"}
+            入席开牌
           </button>
-        </header>
-
-        <span id="gd-hand-keyboard-hint" className="visually-hidden">使用方向键浏览手牌，按空格键选择。</span>
-        <div className="gd-hand-rows" onKeyDown={moveHandFocus}>
-          {handRows.map((row, rowIndex) => (
-            <div className="gd-hand-row" key={rowIndex}>
-              {row.map((card) => (
-                <GuandanCardView
-                  key={card.id}
-                  card={card}
-                  levelRank={state.levelRank}
-                  selectable
-                  selected={selectedIds.includes(card.id)}
-                  onSelect={toggleCard}
-                />
+        )}
+      >
+        <div className="gd-rule-board">
+          <p className="gd-rule-board__lead">你与上方对家同队。轮流打出同型且更大的牌；其余三家都过牌后，由上一手玩家重新领出。</p>
+          <div className="gd-rule-types">
+            <span><b>单 / 对 / 三</b><i>同牌型比点数</i></span>
+            <span><b>三带二 / 五张顺</b><i>按三张或顺子顶张比较</i></span>
+            <span><b>四张起炸</b><i>可压普通牌型，张数优先</i></span>
+            <span><b>红心 {state.levelRank}</b><i>本局百搭“逢人配”</i></span>
+          </div>
+          <p>
+            升级看头游那一队：队友第 2 名升 3 级，第 3 名升 2 级，第 4 名升 1 级。
+            双方各自从 2 起打，先在 A 上再赢一局的一方打过 A，赢下整场。
+          </p>
+          <p className="gd-rule-board__scope">
+            暂不包含进贡还贡、木板/钢板和同花顺炸弹。本局惯例：两张相同的王可作对子；级牌大于 A、小于小王；A2345 是最小顺子。
+          </p>
+          {saveWarning && (
+            <div className="gd-save-warning gd-save-warning--inline" role="alert">
+              <span>{saveWarning}</span>
+              {saveBlocked && <button type="button" onClick={resetUnreadableSave}>重置旧存档并启用保存</button>}
+            </div>
+          )}
+          <div className="gd-difficulty" role="radiogroup" aria-label="对手难度">
+            <small>对手难度 · 对当前及后续牌局生效</small>
+            <div>
+              {DIFFICULTY_OPTIONS.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={state.difficulty === option.id}
+                  className={state.difficulty === option.id ? "is-selected" : ""}
+                  onClick={() => chooseDifficulty(option.id)}
+                >
+                  <strong>{GUANDAN_DIFFICULTY_NAMES[option.id]}</strong>
+                  <span>{option.description}</span>
+                </button>
               ))}
             </div>
-          ))}
-        </div>
-
-        <footer className="gd-actions">
-          <button type="button" className="gd-action gd-action--hint" onClick={suggest} disabled={!humanCanAct}>提示</button>
-          <button type="button" className="gd-action gd-action--pass" onClick={pass} disabled={!humanCanAct || !canPass(state, "human")}>过牌</button>
-          <button type="button" className="gd-action gd-action--play" onClick={playSelection} disabled={!humanCanAct || Boolean(playError) || selectedIds.length === 0}>
-            出牌 <span>→</span>
-          </button>
-        </footer>
-      </section>
-
-      {showLog && (
-        <aside className="gd-log" aria-label="牌局记录">
-          <header><strong>牌桌记录</strong><button type="button" onClick={() => setShowLog(false)} aria-label="关闭牌局记录">×</button></header>
-          <ol>{[...state.log].reverse().map((entry) => <li key={entry.id}><small>{String(entry.id).padStart(2, "0")}</small><span>{entry.text}</span></li>)}</ol>
-        </aside>
-      )}
-
-      {showRules && (
-        <div ref={rulesModalRef} className="gd-modal" role="dialog" aria-modal="true" aria-labelledby="gd-rules-title" tabIndex={-1}>
-          <div className="gd-rule-board">
-            <button type="button" className="gd-rule-board__close" onClick={() => setShowRules(false)} aria-label="关闭规则">×</button>
-            <span className="gd-rule-board__ribbon">升级赛</span>
-            <small>四人 · 对家 · 双副牌</small>
-            <h2 id="gd-rules-title">不是一个人跑得快，<br />是两个人走得远。</h2>
-            <p>你与上方对家同队。轮流打出同型且更大的牌；其余三家都过牌后，由上一手玩家重新领出。</p>
-            <div className="gd-rule-types">
-              <span><b>单 / 对 / 三</b><i>同牌型比点数</i></span>
-              <span><b>三带二 / 五张顺</b><i>按三张或顺子顶张比较</i></span>
-              <span><b>四张起炸</b><i>可压普通牌型，张数优先</i></span>
-              <span><b>红心 {state.levelRank}</b><i>本局百搭“逢人配”</i></span>
-            </div>
-            <p>
-              升级看头游那一队：队友第 2 名升 3 级，第 3 名升 2 级，第 4 名升 1 级。
-              双方各自从 2 起打，先在 A 上再赢一局的一方打过 A，赢下整场。
-            </p>
-            <p className="gd-rule-board__scope">
-              暂不包含进贡还贡、木板/钢板和同花顺炸弹。本局惯例：两张相同的王可作对子；级牌大于 A、小于小王；A2345 是最小顺子。
-            </p>
-            {saveWarning && (
-              <div className="gd-save-warning gd-save-warning--inline" role="alert">
-                <span>{saveWarning}</span>
-                {saveBlocked && <button type="button" onClick={resetUnreadableSave}>重置旧存档并启用保存</button>}
-              </div>
-            )}
-            <div className="gd-difficulty" role="radiogroup" aria-label="对手难度">
-              <small>对手难度 · 对当前及后续牌局生效</small>
-              <div>
-                {DIFFICULTY_OPTIONS.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={state.difficulty === option.id}
-                    className={state.difficulty === option.id ? "is-selected" : ""}
-                    onClick={() => chooseDifficulty(option.id)}
-                  >
-                    <strong>{GUANDAN_DIFFICULTY_NAMES[option.id]}</strong>
-                    <span>{option.description}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-            <button type="button" className="gd-rule-board__enter" onClick={() => { setShowRules(false); playSound("card"); }}>入席开牌 <span>→</span></button>
           </div>
         </div>
-      )}
+      </Dialog>
 
-      {state.status === "finished" && state.winner && dealResult && !showRules && (
-        <div ref={resultModalRef} className="gd-modal gd-modal--result" role="dialog" aria-modal="true" aria-labelledby="gd-result-title" tabIndex={-1}>
-          <div className={`gd-result-board gd-result-board--${state.winner}`}>
-            <span className="gd-result-board__seal" aria-hidden="true">{resultWon ? "贯" : "再"}</span>
-            <small>
-              {champion ? "整场结束" : `第 ${match.dealNumber} 局 · ${teamName(state.winner)}获胜`}
-            </small>
-            <h2 id="gd-result-title">
+      {state.winner && dealResult && (
+        <Dialog
+          open={resultOpen}
+          title={champion
+            ? (resultWon ? "打过 A，赢下整场" : "对手先打过了 A")
+            : (dealResult.partnerPlace <= 2
+              ? (resultWon ? "双下，直升三级" : "被对手双下")
+              : (resultWon ? "拿下本局" : "本局失守"))}
+          className="gd-result-dialog"
+          role="alertdialog"
+          dismissOnBackdrop={false}
+          initialFocus=".gd-result-actions button"
+          footer={(
+            <div className="gd-result-actions">
               {champion
-                ? (resultWon ? "打过 A，赢下整场" : "对手先打过了 A")
-                : (dealResult.partnerPlace <= 2
-                  ? (resultWon ? "双下，直升三级" : "被对手双下")
-                  : (resultWon ? "拿下本局" : "本局失守"))}
-            </h2>
-
+                ? <button type="button" onClick={restart}>再来一场</button>
+                : <button type="button" onClick={nextDeal}>下一局</button>}
+              <button type="button" className="is-secondary" onClick={onExit}>返回大厅</button>
+            </div>
+          )}
+        >
+          <div className="gd-result-board">
+            <small>{champion ? "整场结束" : `第 ${match.dealNumber} 局 · ${teamName(state.winner)}获胜`}</small>
             <div className="gd-level-gain">
               {champion
                 ? <span className="is-target"><small>{teamName(dealResult.winner)}</small><b>打过 A</b></span>
@@ -489,26 +501,167 @@ export function GuandanGame({ onExit, persistence }: GameRuntimeProps) {
                     <span className="is-target"><small>升 {dealResult.gained} 级</small><b>{dealResult.toLevel}</b></span>
                   </>}
             </div>
-
             <p>
               {champion
                 ? (resultWon ? "从 2 一路打到 A，这一场收官。" : "对手率先打过 A。再来一场，换个节奏。")
                 : `头游${getPlayer(state, dealResult.finishOrder[0]).displayName}，队友第 ${dealResult.partnerPlace} 名。下一局由头游先领出。`}
             </p>
-
             <div className="gd-finish-order">
               {state.finishOrder.map((id, index) => <span key={id}><b>{index + 1}</b>{getPlayer(state, id).displayName}</span>)}
             </div>
-
-            <footer>
-              {champion
-                ? <button type="button" onClick={restart}>再来一场</button>
-                : <button type="button" onClick={nextDeal}>下一局 <span aria-hidden="true">→</span></button>}
-              <button type="button" onClick={onExit}>返回大厅</button>
-            </footer>
           </div>
-        </div>
+        </Dialog>
       )}
-    </main>
+    </>
+  );
+
+  return (
+    <GameShell
+      className="guandan-screen"
+      contentClassName="gd-table-content"
+      topBar={(
+        <GameTopBar
+          className="guandan-topbar"
+          title="掼蛋"
+          subtitle={`升级赛 · 第 ${match.dealNumber} 局 · 打 ${state.levelRank}`}
+          onBack={onExit}
+          backLabel="返回游戏大厅"
+          actions={toolActions.slice(0, 2)}
+          onMore={() => setShowTools(true)}
+          moreOpen={showTools}
+          moreLabel="更多选项"
+        />
+      )}
+      status={<span className={informationOpen ? "gd-game-status is-paused" : "gd-game-status"}>{statusText}</span>}
+      overlayActive={overlayOpen}
+      overlay={gameOverlay}
+      actionDockClassName="gd-hand-dock"
+      actionDockLabel="你的手牌"
+      actionDock={(
+        <>
+          <header className="gd-hand-heading">
+            <span><strong>你的手牌 <i>{human.hand.length}</i></strong><small>朱雀方 · 南座</small></span>
+            <span
+              className={`gd-selection-status ${playError ? "is-error" : ""}`}
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              {hintText ?? (selectedIds.length === 0 ? "点选牌面组成牌型" : playError ?? `${selectedCombo?.label ?? "已选"} · ${selectedIds.length} 张`)}
+            </span>
+            <button
+              type="button"
+              className={`gd-autoplay ${autoPilot ? "is-on" : ""}`}
+              aria-pressed={autoPilot}
+              onClick={() => {
+                setAutoPilot((value) => !value);
+                clearTurnUi();
+                playSound("tap");
+              }}
+            >
+              {autoPilot ? "停止托管" : "托管"}
+            </button>
+          </header>
+
+          <span id="gd-hand-keyboard-hint" className="visually-hidden">使用方向键浏览手牌，按空格键选择。每排手牌可以横向滚动。</span>
+          <div ref={handRowsRef} className="gd-hand-rows" onKeyDown={moveHandFocus} aria-describedby="gd-hand-keyboard-hint">
+            {handRows.map((row, rowIndex) => (
+              <div className="gd-hand-row" key={rowIndex} role="group" aria-label={`第 ${rowIndex + 1} 排手牌`}>
+                {row.map((card) => (
+                  <GuandanCardView
+                    key={card.id}
+                    card={card}
+                    levelRank={state.levelRank}
+                    selectable
+                    disabled={!humanCanAct}
+                    tabIndex={card.id === handTabStopId ? 0 : -1}
+                    selected={selectedIds.includes(card.id)}
+                    onSelect={toggleCard}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
+
+          <div className="gd-actions">
+            <button type="button" className="gd-action" onClick={suggest} disabled={!humanCanAct}>提示</button>
+            <button
+              type="button"
+              className="gd-action"
+              onClick={() => { clearTurnUi(); playSound("tap"); }}
+              disabled={!canClearSelection}
+            >
+              清空
+            </button>
+            <button type="button" className="gd-action" onClick={pass} disabled={!humanCanAct || !canPass(state, "human")}>过牌</button>
+            <button type="button" className="gd-action gd-action--play" onClick={playSelection} disabled={!humanCanAct || Boolean(playError) || selectedIds.length === 0}>
+              {playActionLabel}
+            </button>
+          </div>
+        </>
+      )}
+    >
+      <div
+        className="gd-level-rail"
+        role="group"
+        aria-label={`第 ${match.dealNumber} 局，打 ${teamName(match.attackingTeam)}的 ${state.levelRank}。朱雀方 ${match.levels.vermillion} 级，青岳方 ${match.levels.indigo} 级`}
+      >
+        <span>第 {match.dealNumber} 局 · 逢人配 ♥{state.levelRank}</span>
+        <div className="gd-level-track" aria-hidden="true">
+          {NUMBER_RANKS.map((rank) => <i key={rank} className={rank === state.levelRank ? "is-level" : ""}>{rank}</i>)}
+        </div>
+        <strong className="gd-match-score">
+          {(["vermillion", "indigo"] as const).map((team) => (
+            <b
+              key={team}
+              className={`gd-match-score__team gd-match-score__team--${team} ${match.attackingTeam === team ? "is-attacking" : ""}`}
+            >
+              {team === "vermillion" ? "朱雀" : "青岳"}<i>{match.levels[team]}</i>
+            </b>
+          ))}
+        </strong>
+      </div>
+
+      <section className="gd-arena" aria-label="四人掼蛋牌桌">
+        <Seat
+          player={partner}
+          active={state.activePlayerId === partner.id}
+          lastActorId={state.lastAction?.actorId === "table" ? undefined : state.lastAction?.actorId}
+        />
+        {opposingPlayers.map((player) => (
+          <Seat
+            key={player.id}
+            player={player}
+            active={state.activePlayerId === player.id}
+            lastActorId={state.lastAction?.actorId === "table" ? undefined : state.lastAction?.actorId}
+          />
+        ))}
+
+        <div
+          className={`gd-trick ${state.trick?.combo.type === "bomb" ? "is-bomb" : ""}`}
+          role="group"
+          aria-label="当前牌墩"
+          aria-busy={aiThinking}
+        >
+          <header>
+            <span><small>当前牌墩</small><strong>{state.trick?.combo.label ?? "等待领出"}</strong></span>
+            {state.trick && <b>{getPlayer(state, state.trick.actorId).displayName} · {state.trick.combo.cards.length} 张</b>}
+          </header>
+          <div className="gd-trick__cards">
+            {state.trick ? state.trick.combo.cards.map((card) => (
+              <GuandanCardView key={card.id} card={card} levelRank={state.levelRank} compact />
+            )) : <span className="gd-trick__empty">暂无出牌</span>}
+          </div>
+          <p key={state.revision} className={aiThinking ? "is-thinking" : undefined}>
+            {tableMessage}
+            {aiThinking && <span className="gd-thinking-dots" aria-hidden="true"><i /><i /><i /></span>}
+          </p>
+        </div>
+
+        <div className={`gd-turn-flag gd-turn-flag--${active.team}`}>
+          <i aria-hidden="true" />
+          <span>{state.status === "finished" ? "牌局结束" : `${active.displayName}的行动`}</span>
+        </div>
+      </section>
+    </GameShell>
   );
 }

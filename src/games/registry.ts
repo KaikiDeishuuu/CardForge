@@ -76,6 +76,21 @@ export const gameRegistry = new GameRegistry().register({
   load: () => import("./guandan"),
 }).register({
   manifest: {
+    id: "texas-holdem",
+    name: "德州扑克",
+    shortName: "德州",
+    description: "双人无限注快速桌，在四条街中管理筹码、范围与下注压力。",
+    genre: "无限注扑克",
+    players: "单人 vs AI",
+    sessionLength: "约 5–10 分钟",
+    availability: "playable",
+    accent: "#b88955",
+    mark: "德",
+    tagline: "两张底牌，四轮抉择",
+  },
+  load: () => import("./texas-holdem"),
+}).register({
+  manifest: {
     id: "dingding",
     name: "定鼎",
     shortName: "定鼎",

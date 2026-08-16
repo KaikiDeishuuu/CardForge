@@ -1,4 +1,4 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import {
   EMBER_PACT_SAVE_KEY,
   FUTURE_EMBER_PACT_DATA,
@@ -16,6 +16,21 @@ function collectPageErrors(page: Page) {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   return () => expect(errors, "页面不应产生未处理异常").toEqual([]);
+}
+
+async function readProductionEntryScript(request: APIRequestContext): Promise<string> {
+  const response = await request.get("/");
+  expect(response.ok(), "预览服务器应返回生产 index.html").toBe(true);
+  const html = await response.text();
+  const entry = html.match(/<script[^>]*\bsrc="([^"]+\.js)"/i)?.[1];
+  expect(entry, "生产 index.html 应包含入口脚本").toBeTruthy();
+  return entry!;
+}
+
+function isProductionGameScript(url: URL, entryScript: string): boolean {
+  return url.pathname.startsWith("/assets/")
+    && url.pathname.endsWith(".js")
+    && url.pathname !== entryScript;
 }
 
 async function measurableBox(locator: Locator, message: string) {
@@ -123,8 +138,9 @@ async function settleLayout(page: Page) {
   });
 }
 
-async function enterGame(page: Page, id: "ember-pact" | "twenty-one" | "guandan" | "dingding") {
+async function enterGame(page: Page, id: "ember-pact" | "twenty-one" | "guandan" | "texas-holdem" | "dingding") {
   await page.goto(`/?game=${id}`);
+  if (id === "texas-holdem") return;
   // 定鼎开局多一步三选一选将，选完才轮到规则页的入席按钮。
   if (id === "dingding") {
     const draft = page.getByRole("dialog", { name: /三选一/ });
@@ -140,15 +156,16 @@ async function enterGame(page: Page, id: "ember-pact" | "twenty-one" | "guandan"
   await page.getByRole("button", { name: new RegExp(entryLabels[id]) }).click();
 }
 
-test("大厅展示四张独立牌桌且不会横向溢出", async ({ page }) => {
+test("大厅展示五张独立牌桌且不会横向溢出", async ({ page }) => {
   const assertNoPageErrors = collectPageErrors(page);
   await page.goto("/");
 
   await expect(page.getByRole("button", { name: /争焰/ })).toBeEnabled();
   await expect(page.getByRole("button", { name: /二十一刻/ })).toBeEnabled();
   await expect(page.getByRole("button", { name: /掼蛋/ })).toBeEnabled();
+  await expect(page.getByRole("button", { name: /德州扑克/ })).toBeEnabled();
   await expect(page.getByRole("button", { name: /定鼎/ })).toBeEnabled();
-  await expect(page.locator(".featured-game, .planned-game.is-playable")).toHaveCount(4);
+  await expect(page.locator(".featured-game, .planned-game.is-playable")).toHaveCount(5);
   await expectNoDocumentOverflow(page);
   assertNoPageErrors();
 });
@@ -415,18 +432,30 @@ test("掼蛋支持键盘浏览、提示与出牌", async ({ page }) => {
   await cards.first().focus();
   await page.keyboard.press("ArrowRight");
   await expect(cards.nth(1)).toBeFocused();
+  await expect(cards.first()).toHaveAttribute("tabindex", "-1");
+  await expect(cards.nth(1)).toHaveAttribute("tabindex", "0");
 
-  // 选中牌应抬起但继续遵循从左到右的自然叠放：右邻仍在交叠区上层，
-  // 同时双排布局要为抬升完整预留空间。
+  // 手牌不再依靠负边距叠放；选中只轻微抬起，仍完整保留相邻牌面与命中区。
   const selected = cards.nth(1);
   const rightNeighbor = cards.nth(2);
   await page.keyboard.press("Space");
   await expect(selected).toHaveAttribute("aria-pressed", "true");
+  const focusPaint = await selected.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      focusVisible: element.matches(":focus-visible"),
+      outlineOffset: Number.parseFloat(style.outlineOffset),
+      boxShadow: style.boxShadow,
+    };
+  });
+  expect(focusPaint.focusVisible, "键盘选中的手牌应显示焦点").toBe(true);
+  expect(focusPaint.outlineOffset, "手牌焦点环应内绘，避免被横向滚动容器裁切").toBeLessThan(0);
+  expect(focusPaint.boxShadow, "选中态焦点强调应绘制在牌面内部").toContain("inset");
   await expect.poll(async () => {
     const selectedBox = await selected.boundingBox();
     const neighborBox = await rightNeighbor.boundingBox();
     return selectedBox && neighborBox ? neighborBox.y - selectedBox.y : 0;
-  }).toBeGreaterThanOrEqual(7);
+  }).toBeGreaterThanOrEqual(2);
 
   const handRows = hand.locator(".gd-hand-rows");
   const selectedBox = await selected.boundingBox();
@@ -435,24 +464,12 @@ test("掼蛋支持键盘浏览、提示与出牌", async ({ page }) => {
   expect(handRowsBox).not.toBeNull();
   expect(selectedBox!.y, "选中牌顶部不应被手牌容器裁掉").toBeGreaterThanOrEqual(handRowsBox!.y - 1);
 
-  const naturalStacking = await rightNeighbor.evaluate((element) => {
-    const neighbor = element as HTMLElement;
-    const previous = neighbor.previousElementSibling as HTMLElement | null;
-    if (!previous) return false;
-    const previousRect = previous.getBoundingClientRect();
-    const neighborRect = neighbor.getBoundingClientRect();
-    const overlapTop = Math.max(previousRect.top, neighborRect.top);
-    const overlapBottom = Math.min(previousRect.bottom, neighborRect.bottom);
-    const overlapLeft = Math.max(previousRect.left, neighborRect.left);
-    const overlapRight = Math.min(previousRect.right, neighborRect.right);
-    if (overlapBottom <= overlapTop || overlapRight <= overlapLeft) return false;
-    const hit = document.elementFromPoint(
-      (overlapLeft + overlapRight) / 2,
-      (overlapTop + overlapBottom) / 2,
-    );
-    return hit?.closest("button.gd-card") === neighbor;
-  });
-  expect(naturalStacking, "右邻牌应覆盖交叠区，保持牌点和点击区域可用").toBe(true);
+  const neighborBox = await rightNeighbor.boundingBox();
+  expect(neighborBox).not.toBeNull();
+  expect(
+    neighborBox!.x,
+    "相邻手牌不应相互覆盖",
+  ).toBeGreaterThanOrEqual(selectedBox!.x + selectedBox!.width - 1);
 
   const rows = hand.locator(".gd-hand-row");
   const firstRowCardBox = await rows.nth(0).locator("button.gd-card").first().boundingBox();
@@ -472,18 +489,50 @@ test("掼蛋支持键盘浏览、提示与出牌", async ({ page }) => {
 
   await page.getByRole("button", { name: "提示" }).click();
   await expect(hand.locator('button.gd-card[aria-pressed="true"]').first()).toBeVisible();
-  const play = page.getByRole("button", { name: /出牌/ });
+  const play = page.locator(".gd-action--play");
   await expect(play).toBeEnabled();
   const initialCount = await cards.count();
   await play.click();
   await expect.poll(() => cards.count()).toBeLessThan(initialCount);
   const trick = page.locator(".gd-trick");
   await expect(trick).toHaveAttribute("aria-busy", "true");
-  await expect(trick).toContainText(/正在理牌/);
+  await expect(trick).toContainText(/思考中/);
   const activeSeat = await page.locator(".gd-turn-flag span").textContent();
   await page.waitForTimeout(350);
   await expect(page.locator(".gd-turn-flag span")).toHaveText(activeSeat ?? "");
   assertNoPageErrors();
+});
+
+test("掼蛋在 AI 回合后恢复键盘手牌焦点", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "焦点生命周期与视口无关，只在一个桌面项目验证");
+  await page.goto("/");
+  await page.evaluate(() => {
+    window.localStorage.removeItem("cardforge.save.guandan");
+    window.localStorage.setItem("cardforge.playback-speed", "4");
+  });
+  await page.goto("/?game=guandan");
+  await page.getByRole("button", { name: /入席开牌/ }).click();
+
+  const hand = page.getByRole("region", { name: "你的手牌" });
+  const firstCard = hand.locator('button.gd-card[tabindex="0"]');
+  await expect(firstCard).toHaveCount(1);
+  await firstCard.focus();
+  await page.keyboard.press("Space");
+  await page.keyboard.press("Tab");
+  await expect(hand.getByRole("button", { name: "提示" })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(hand.getByRole("button", { name: "清空" })).toBeFocused();
+  await page.keyboard.press("Tab");
+
+  const play = hand.locator(".gd-action--play");
+  await expect(play).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("status")).not.toContainText("轮到你出牌");
+  await expect(page.getByRole("status")).toContainText("轮到你出牌", { timeout: 10_000 });
+
+  const restoredTabStop = hand.locator('button.gd-card[tabindex="0"]:not(:disabled)');
+  await expect(restoredTabStop).toHaveCount(1);
+  await expect(restoredTabStop).toBeFocused();
 });
 
 test("定鼎身份局可以入席并展示四席暗局", async ({ page }) => {
@@ -649,10 +698,11 @@ test("声音偏好会跨牌桌和刷新保持", async ({ page }, testInfo) => {
   assertNoPageErrors();
 });
 
-test("游戏模块加载期间显示带忙碌状态的宿主页", async ({ page }, testInfo) => {
+test("游戏模块加载期间显示带忙碌状态的宿主页", async ({ page, request }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "宿主生命周期与视口无关，只在一个桌面项目验证");
   const assertNoPageErrors = collectPageErrors(page);
-  await page.route("**/src/games/ember-pact/index.ts", async (route) => {
+  const entryScript = await readProductionEntryScript(request);
+  await page.route((url) => isProductionGameScript(url, entryScript), async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 700));
     await route.continue();
   });
@@ -666,12 +716,19 @@ test("游戏模块加载期间显示带忙碌状态的宿主页", async ({ page 
   assertNoPageErrors();
 });
 
-test("游戏模块加载失败后可以重试恢复", async ({ page }, testInfo) => {
+test("游戏模块加载失败后可以重试恢复", async ({ page, request }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "宿主生命周期与视口无关，只在一个桌面项目验证");
+  const entryScript = await readProductionEntryScript(request);
   let shouldFail = true;
-  await page.route(/\/src\/games\/twenty-one\/.*\.(?:ts|tsx)(?:\?.*)?$/, async (route) => {
-    if (shouldFail) await route.abort("failed");
-    else await route.continue();
+  await page.route((url) => isProductionGameScript(url, entryScript), async (route) => {
+    if (shouldFail) {
+      // The first failed dynamic chunk is enough to make the lazy import fail.
+      // Subsequent requests must continue so the reload has a chance to recover.
+      shouldFail = false;
+      await route.abort("failed");
+    } else {
+      await route.continue();
+    }
   });
 
   await page.goto("/?game=twenty-one");
@@ -682,13 +739,14 @@ test("游戏模块加载失败后可以重试恢复", async ({ page }, testInfo)
 
   shouldFail = false;
   await retry.click();
-  await expect(page.getByRole("dialog", { name: /选择这一席/ })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "选择玩法" })).toBeVisible();
 });
 
 for (const game of [
   { id: "ember-pact", landmark: "争焰战场" },
   { id: "twenty-one", landmark: "二十一刻牌桌" },
   { id: "guandan", landmark: "四人掼蛋牌桌" },
+  { id: "texas-holdem", landmark: "双人德州扑克牌桌" },
   { id: "dingding", landmark: "四席定鼎牌桌" },
 ] as const) {
   test(`${game.id} 牌桌适配当前视口`, async ({ page }) => {

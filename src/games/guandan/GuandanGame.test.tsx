@@ -78,13 +78,31 @@ describe("GuandanGame AI pacing", () => {
     );
 
     expect(screen.getByText("东座的行动")).toBeTruthy();
-    expect(screen.getByText(/东座正在理牌/)).toBeTruthy();
+    expect(screen.getAllByText(/东座思考中/).length).toBeGreaterThan(0);
     act(() => vi.advanceTimersByTime(delay - 1));
     expect(screen.getByText("东座的行动")).toBeTruthy();
 
     act(() => vi.advanceTimersByTime(1));
     expect(screen.getByText("对家的行动")).toBeTruthy();
-    expect(screen.getByText(/对家正在理牌/)).toBeTruthy();
+    expect(screen.getAllByText(/对家思考中/).length).toBeGreaterThan(0);
+  });
+
+  it("keeps a readable presentation floor even at the fastest playback setting", () => {
+    vi.useFakeTimers();
+    window.localStorage.setItem(PLAYBACK_SPEED_STORAGE_KEY, "4");
+    const state = createEastTurn();
+
+    render(
+      <SoundProvider>
+        <GuandanGame onExit={vi.fn()} persistence={restoredPersistence(state)} />
+      </SoundProvider>,
+    );
+
+    expect(screen.getByText("东座的行动")).toBeTruthy();
+    act(() => vi.advanceTimersByTime(599));
+    expect(screen.getByText("东座的行动")).toBeTruthy();
+    act(() => vi.advanceTimersByTime(1));
+    expect(screen.getByText("对家的行动")).toBeTruthy();
   });
 
   it("cancels a pending move while the record panel is open and restarts it on close", () => {
@@ -108,5 +126,90 @@ describe("GuandanGame AI pacing", () => {
     expect(screen.getByText("东座的行动")).toBeTruthy();
     act(() => vi.advanceTimersByTime(1));
     expect(screen.getByText("对家的行动")).toBeTruthy();
+  });
+});
+
+describe("GuandanGame hand interaction", () => {
+  it("uses one tab stop for the hand while retaining arrow-key navigation", () => {
+    const state = createInitialState(() => 0.37);
+    render(
+      <SoundProvider>
+        <GuandanGame onExit={vi.fn()} persistence={restoredPersistence(state)} />
+      </SoundProvider>,
+    );
+
+    const cards = Array.from(screen.getByRole("region", { name: "你的手牌" })
+      .querySelectorAll<HTMLButtonElement>("button.gd-card"));
+    expect(cards.filter((card) => card.tabIndex === 0)).toHaveLength(1);
+    cards[0].focus();
+    fireEvent.keyDown(cards[0], { key: "ArrowRight" });
+    expect(document.activeElement).toBe(cards[1]);
+    expect(cards[0].tabIndex).toBe(-1);
+    expect(cards[1].tabIndex).toBe(0);
+
+    fireEvent.click(cards[3]);
+    expect(cards[1].tabIndex).toBe(-1);
+    expect(cards[3].tabIndex).toBe(0);
+  });
+
+  it("exposes explicit selection feedback and clears the complete selection in one action", () => {
+    const state = createInitialState(() => 0.37);
+    render(
+      <SoundProvider>
+        <GuandanGame onExit={vi.fn()} persistence={restoredPersistence(state)} />
+      </SoundProvider>,
+    );
+
+    const hand = screen.getByRole("region", { name: "你的手牌" });
+    const cards = Array.from(hand.querySelectorAll<HTMLButtonElement>("button.gd-card"));
+    expect(cards.length).toBe(27);
+    fireEvent.click(cards[0]);
+    expect(cards[0].getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "清空" }).hasAttribute("disabled")).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "清空" }));
+    expect(cards[0].getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByRole("button", { name: "出牌" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("makes the hand unavailable while an AI turn is pending", () => {
+    vi.useFakeTimers();
+    const state = createEastTurn();
+    render(
+      <SoundProvider>
+        <GuandanGame onExit={vi.fn()} persistence={restoredPersistence(state)} />
+      </SoundProvider>,
+    );
+
+    const hand = screen.getByRole("region", { name: "你的手牌" });
+    const cards = Array.from(hand.querySelectorAll<HTMLButtonElement>("button.gd-card"));
+    expect(cards.length).toBeGreaterThan(0);
+    expect(cards.every((card) => card.disabled)).toBe(true);
+  });
+
+  it("restores focus to the hand after keyboard play and the AI round", () => {
+    vi.useFakeTimers();
+    const state = createInitialState(() => 0.37);
+    render(
+      <SoundProvider>
+        <GuandanGame onExit={vi.fn()} persistence={restoredPersistence(state)} />
+      </SoundProvider>,
+    );
+
+    const hand = screen.getByRole("region", { name: "你的手牌" });
+    const firstCard = hand.querySelector<HTMLButtonElement>("button.gd-card")!;
+    fireEvent.click(firstCard);
+    const play = screen.getByRole<HTMLButtonElement>("button", { name: /出单张/ });
+    play.focus();
+    fireEvent.click(play);
+    expect(play.disabled).toBe(true);
+
+    for (let index = 0; index < 3; index += 1) {
+      act(() => vi.advanceTimersByTime(10_000));
+    }
+    const enabledCards = Array.from(hand.querySelectorAll<HTMLButtonElement>("button.gd-card:not(:disabled)"));
+    expect(enabledCards.length).toBeGreaterThan(0);
+    expect(document.activeElement).toBe(enabledCards[0]);
+    expect(enabledCards.filter((card) => card.tabIndex === 0)).toEqual([enabledCards[0]]);
   });
 });

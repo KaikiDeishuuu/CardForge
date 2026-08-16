@@ -160,7 +160,7 @@ export function createEmptyChallengeRecords(): ChallengeRecords {
 export function createDefaultRootState(): TwentyOneRootState {
   return {
     revision: 0,
-    preferences: { rules: STANDARD_SIX_RULES, assistEnabled: false, lastBet: 25 },
+    preferences: { rules: STANDARD_SIX_RULES, assistEnabled: false },
     lifetimeStats: createEmptyStats(CLASSIC_STARTING_CHIPS),
     challengeRecords: createEmptyChallengeRecords(),
   };

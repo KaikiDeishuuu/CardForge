@@ -1,0 +1,818 @@
+@import url("../../styles/tokens.css");
+
+.texas-holdem-screen {
+  --cf-color-accent: #a84f3d;
+  --cf-game-content-padding: clamp(0.5rem, 2vw, 1.25rem);
+  --poker-card-width: clamp(2.8rem, 14vw, 4.75rem);
+  background:
+    radial-gradient(circle at 50% 42%, rgb(50 111 98 / 32%), transparent 42%),
+    #123a34;
+}
+
+.texas-holdem-screen button {
+  min-height: var(--cf-touch-target);
+}
+
+.holdem-topbar {
+  background: rgb(8 39 34 / 88%);
+}
+
+.holdem-game-status {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.holdem-game-status.is-paused {
+  color: #f2d7a8;
+}
+
+.holdem-table-content {
+  display: flex;
+  overflow: hidden;
+}
+
+.holdem-table {
+  width: min(100%, 64rem);
+  min-width: 0;
+  min-height: 100%;
+  margin: auto;
+  display: grid;
+  grid-template-rows: auto minmax(8.5rem, 1fr) auto;
+  gap: clamp(0.35rem, 1.2vh, 0.75rem);
+}
+
+.holdem-seat {
+  min-width: 0;
+  padding: clamp(0.4rem, 1.2vw, 0.7rem);
+  display: grid;
+  grid-template-columns: minmax(7.5rem, 1fr) auto;
+  grid-template-areas:
+    "identity cards"
+    "state cards";
+  align-items: center;
+  gap: 0.3rem 0.75rem;
+  color: var(--cf-color-text-on-table);
+  background: rgb(5 31 27 / 32%);
+  border: 1px solid var(--cf-color-border-on-table);
+  border-radius: var(--cf-radius-md);
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
+
+.holdem-seat--opponent {
+  width: min(100%, 35rem);
+  justify-self: center;
+}
+
+.holdem-seat--human {
+  width: min(100%, 42rem);
+  justify-self: center;
+  background: rgb(5 31 27 / 48%);
+}
+
+.holdem-seat.is-active {
+  background: rgb(48 106 92 / 45%);
+  border-color: rgb(244 215 163 / 70%);
+  box-shadow: inset 3px 0 0 #e2b969;
+}
+
+.holdem-seat.is-winner {
+  border-color: #e2b969;
+}
+
+.holdem-seat.is-folded {
+  opacity: 0.72;
+}
+
+.holdem-seat__identity {
+  grid-area: identity;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.holdem-seat__avatar {
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: 0 0 2.5rem;
+  display: grid;
+  place-items: center;
+  color: #193c36;
+  background: #eee9dc;
+  border-radius: 50%;
+  font-size: var(--cf-font-size-sm);
+  font-weight: 800;
+}
+
+.holdem-seat--opponent .holdem-seat__avatar {
+  color: #e8eee9;
+  background: #506c65;
+}
+
+.holdem-seat__copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.holdem-seat__copy small,
+.holdem-seat__chips small,
+.holdem-seat__state,
+.holdem-seat__state em {
+  font-size: var(--cf-font-size-xs);
+}
+
+.holdem-seat__copy small {
+  color: var(--cf-color-text-on-table-muted);
+}
+
+.holdem-seat__copy strong {
+  overflow: hidden;
+  font-size: var(--cf-font-size-md);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.holdem-seat__chips {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1.15;
+}
+
+.holdem-seat__chips b {
+  color: #f4d79f;
+  font-size: var(--cf-font-size-lg);
+  font-variant-numeric: tabular-nums;
+}
+
+.holdem-seat__chips small {
+  color: var(--cf-color-text-on-table-muted);
+}
+
+.holdem-seat__cards {
+  grid-area: cards;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+
+.holdem-seat__state {
+  grid-area: state;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  color: var(--cf-color-text-on-table-muted);
+  line-height: 1.3;
+}
+
+.holdem-seat__state > span,
+.holdem-seat__state > b,
+.holdem-seat__state > em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.holdem-seat__state > b {
+  color: #efd29c;
+  font-weight: 650;
+}
+
+.holdem-seat__state > em {
+  color: var(--cf-color-text-on-table);
+  font-style: normal;
+}
+
+.holdem-seat__state .is-thinking,
+.holdem-waiting-actions .is-thinking {
+  color: #f4d79f;
+}
+
+.poker-card {
+  position: relative;
+  width: var(--poker-card-width);
+  aspect-ratio: 5 / 7;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border-radius: clamp(0.35rem, 1vw, 0.6rem);
+}
+
+.poker-card.is-compact {
+  width: max(2.2rem, calc(var(--poker-card-width) * 0.72));
+}
+
+.poker-card--face {
+  color: #17201e;
+  background: #fffdf7;
+  border: 1px solid rgb(14 31 27 / 18%);
+  box-shadow: 0 2px 7px rgb(3 21 18 / 24%);
+}
+
+.poker-card--face.is-red {
+  color: #b64237;
+}
+
+.poker-card--face.is-emphasized {
+  border-color: #e3b95f;
+  box-shadow: 0 0 0 2px #e3b95f, 0 3px 9px rgb(3 21 18 / 30%);
+}
+
+.poker-card__corner {
+  position: absolute;
+  top: 0.24em;
+  left: 0.3em;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: clamp(0.75rem, calc(var(--poker-card-width) * 0.27), 1.08rem);
+  font-style: normal;
+  line-height: 0.92;
+}
+
+.poker-card__corner b {
+  font-weight: 800;
+}
+
+.poker-card__corner i {
+  font-style: normal;
+}
+
+.poker-card__suit {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding-top: 0.22em;
+  font-size: clamp(1.15rem, calc(var(--poker-card-width) * 0.52), 2.35rem);
+}
+
+.poker-card--back {
+  display: grid;
+  place-items: center;
+  color: rgb(255 255 255 / 72%);
+  background:
+    linear-gradient(135deg, transparent 42%, rgb(255 255 255 / 9%) 42% 50%, transparent 50%) 0 0 / 0.65rem 0.65rem,
+    #814438;
+  border: 0.2rem solid #eee8d9;
+  box-shadow: 0 2px 7px rgb(3 21 18 / 25%);
+  font-family: var(--cf-font-display);
+  font-size: var(--cf-font-size-xs);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.poker-card--placeholder {
+  background: rgb(3 28 24 / 14%);
+  border: 1px dashed rgb(255 255 255 / 22%);
+  box-shadow: inset 0 0 0 0.22rem rgb(255 255 255 / 2%);
+}
+
+.holdem-board-zone {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(0.35rem, 1vh, 0.65rem);
+}
+
+.holdem-pot {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.holdem-pot > span {
+  min-height: 2rem;
+  padding: 0.2rem 0.75rem;
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  color: #193a34;
+  background: #eee9dc;
+  border-radius: var(--cf-radius-pill);
+}
+
+.holdem-pot small,
+.holdem-pot i,
+.holdem-table-message {
+  font-size: var(--cf-font-size-xs);
+}
+
+.holdem-pot strong {
+  font-size: var(--cf-font-size-lg);
+  font-variant-numeric: tabular-nums;
+}
+
+.holdem-pot i {
+  color: var(--cf-color-text-on-table-muted);
+  font-style: normal;
+}
+
+.holdem-board {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+  gap: clamp(0.22rem, 1.3vw, 0.6rem);
+}
+
+.holdem-table-message {
+  width: min(100%, 36rem);
+  min-height: 1.3em;
+  margin: 0;
+  overflow: hidden;
+  color: var(--cf-color-text-on-table-muted);
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.holdem-thinking-dots {
+  margin-left: 0.35rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.16rem;
+}
+
+.holdem-thinking-dots b {
+  width: 0.25rem;
+  height: 0.25rem;
+  background: currentColor;
+  border-radius: 50%;
+  animation: holdem-thinking 900ms ease-in-out infinite alternate;
+}
+
+.holdem-thinking-dots b:nth-child(2) { animation-delay: 150ms; }
+.holdem-thinking-dots b:nth-child(3) { animation-delay: 300ms; }
+
+.holdem-action-dock {
+  padding-top: var(--cf-space-2);
+}
+
+.holdem-action-dock > * {
+  width: min(100%, 48rem);
+  margin-inline: auto;
+}
+
+.holdem-primary-actions {
+  display: grid;
+  grid-template-columns: minmax(4.25rem, 0.8fr) minmax(6.5rem, 1.2fr) minmax(5.5rem, 1fr);
+  gap: var(--cf-space-2);
+}
+
+.holdem-action,
+.holdem-finished-actions button,
+.holdem-raise-presets button,
+.holdem-raise-editor__amount button,
+.holdem-dialog-primary,
+.holdem-dialog-secondary,
+.holdem-dialog-danger,
+.holdem-save-panel button {
+  border: 0;
+  border-radius: var(--cf-radius-md);
+  cursor: pointer;
+  font-size: max(var(--cf-font-size-sm), 0.75rem);
+  font-weight: 720;
+}
+
+.holdem-action {
+  padding: 0.35rem 0.5rem;
+  color: var(--cf-color-text);
+  background: #e9e7df;
+}
+
+.holdem-action:hover,
+.holdem-raise-presets button:hover,
+.holdem-dialog-secondary:hover {
+  background: #dedbd1;
+}
+
+.holdem-action--fold {
+  color: var(--cf-color-danger);
+  background: transparent;
+  border: 1px solid var(--cf-color-border);
+}
+
+.holdem-action--raise,
+.holdem-finished-actions button,
+.holdem-dialog-primary {
+  color: var(--cf-color-accent-contrast);
+  background: var(--cf-color-accent);
+}
+
+.holdem-action--raise:hover,
+.holdem-finished-actions button:hover,
+.holdem-dialog-primary:hover {
+  background: #914131;
+}
+
+.holdem-action:disabled,
+.holdem-raise-presets button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.holdem-raise-editor {
+  margin-bottom: var(--cf-space-2);
+  display: grid;
+  gap: var(--cf-space-2);
+}
+
+.holdem-raise-editor__amount {
+  min-height: var(--cf-touch-target);
+  display: flex;
+  align-items: center;
+  gap: var(--cf-space-2);
+}
+
+.holdem-raise-editor__amount label {
+  color: var(--cf-color-text-muted);
+  font-size: var(--cf-font-size-sm);
+}
+
+.holdem-raise-editor__amount output {
+  font-size: var(--cf-font-size-lg);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.holdem-raise-editor__amount button {
+  width: var(--cf-touch-target);
+  margin-left: auto;
+  color: var(--cf-color-text-muted);
+  background: transparent;
+  font-size: 1.25rem;
+}
+
+.holdem-raise-editor input[type="range"] {
+  width: 100%;
+  min-height: var(--cf-touch-target);
+  margin: 0;
+  accent-color: var(--cf-color-accent);
+  cursor: pointer;
+}
+
+.holdem-raise-presets {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--cf-space-2);
+}
+
+.holdem-raise-presets:has(> :only-child) {
+  grid-template-columns: minmax(7rem, 12rem);
+  justify-content: end;
+}
+
+.holdem-raise-presets button {
+  min-width: 0;
+  padding: 0.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  color: var(--cf-color-text);
+  background: #e9e7df;
+  border: 1px solid transparent;
+}
+
+.holdem-raise-presets button.is-selected {
+  color: var(--cf-color-accent);
+  background: #f4e6df;
+  border-color: rgb(168 79 61 / 38%);
+}
+
+.holdem-raise-presets small {
+  font-size: var(--cf-font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.holdem-finished-actions,
+.holdem-waiting-actions {
+  min-height: var(--cf-touch-target);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--cf-space-4);
+}
+
+.holdem-finished-actions {
+  justify-content: space-between;
+}
+
+.holdem-finished-actions > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.holdem-finished-actions small,
+.holdem-waiting-actions small {
+  color: var(--cf-color-text-muted);
+  font-size: var(--cf-font-size-xs);
+}
+
+.holdem-finished-actions strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.holdem-finished-actions button {
+  min-width: 7rem;
+  padding-inline: var(--cf-space-4);
+}
+
+.holdem-waiting-actions {
+  flex-direction: column;
+  gap: 0.1rem;
+  color: var(--cf-color-text);
+  text-align: center;
+}
+
+.holdem-log-list {
+  margin: 0;
+  padding: 0;
+  display: grid;
+  list-style: none;
+}
+
+.holdem-log-list li {
+  min-height: var(--cf-touch-target);
+  padding: 0.65rem 0;
+  display: grid;
+  grid-template-columns: 2.5rem minmax(0, 1fr);
+  gap: var(--cf-space-3);
+  align-items: baseline;
+  border-bottom: 1px solid var(--cf-color-border);
+}
+
+.holdem-log-list li:last-child {
+  border-bottom: 0;
+}
+
+.holdem-log-list small {
+  color: var(--cf-color-text-muted);
+  font-family: var(--cf-font-mono);
+  font-size: var(--cf-font-size-xs);
+}
+
+.holdem-log-list span {
+  font-size: var(--cf-font-size-sm);
+}
+
+.holdem-rules {
+  display: grid;
+  gap: var(--cf-space-4);
+}
+
+.holdem-rules p,
+.holdem-rules h3,
+.holdem-restart-copy,
+.holdem-save-panel p {
+  margin: 0;
+}
+
+.holdem-rules section {
+  padding-top: var(--cf-space-3);
+  border-top: 1px solid var(--cf-color-border);
+}
+
+.holdem-rules h3 {
+  margin-bottom: var(--cf-space-1);
+  font-size: var(--cf-font-size-md);
+}
+
+.holdem-rules p,
+.holdem-restart-copy,
+.holdem-save-panel p {
+  font-size: var(--cf-font-size-sm);
+  line-height: var(--cf-line-height-relaxed);
+}
+
+.holdem-rules__note {
+  color: var(--cf-color-text-muted);
+}
+
+.holdem-dialog-actions {
+  display: flex;
+  gap: var(--cf-space-2);
+}
+
+.holdem-dialog-primary,
+.holdem-dialog-secondary,
+.holdem-dialog-danger,
+.holdem-save-panel button {
+  padding-inline: var(--cf-space-4);
+}
+
+.holdem-dialog-secondary {
+  color: var(--cf-color-text);
+  background: #e9e7df;
+}
+
+.holdem-dialog-danger {
+  color: #fff;
+  background: var(--cf-color-danger);
+}
+
+.holdem-save-panel {
+  display: grid;
+  gap: var(--cf-space-3);
+}
+
+.holdem-save-panel button {
+  width: 100%;
+  color: #fff;
+  background: var(--cf-color-danger);
+}
+
+@media (max-width: 23rem) {
+  .texas-holdem-screen {
+    --cf-game-content-padding: 0.4rem;
+    --poker-card-width: 2.7rem;
+  }
+
+  .holdem-table {
+    gap: 0.3rem;
+  }
+
+  .holdem-seat {
+    padding: 0.35rem;
+    gap: 0.25rem 0.4rem;
+  }
+
+  .holdem-seat__avatar {
+    width: 2.15rem;
+    height: 2.15rem;
+    flex-basis: 2.15rem;
+  }
+
+  .holdem-seat__identity {
+    gap: 0.4rem;
+  }
+
+  .holdem-seat__state {
+    gap: 0.35rem;
+  }
+
+  .holdem-primary-actions {
+    grid-template-columns: 0.75fr 1.25fr 1fr;
+    gap: var(--cf-space-1);
+  }
+
+  .holdem-action {
+    padding-inline: 0.2rem;
+  }
+
+  .holdem-raise-presets {
+    gap: var(--cf-space-1);
+  }
+
+  .holdem-raise-presets button {
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .texas-holdem-screen.is-raising {
+    --poker-card-width: 2.35rem;
+  }
+
+  .texas-holdem-screen.is-raising .holdem-table {
+    grid-template-rows: auto minmax(6.5rem, 1fr) auto;
+    gap: 0.15rem;
+  }
+
+  .texas-holdem-screen.is-raising .holdem-seat {
+    padding-block: 0.2rem;
+  }
+
+  .texas-holdem-screen.is-raising .holdem-board-zone {
+    gap: 0.2rem;
+  }
+
+  .texas-holdem-screen.is-raising .holdem-table-message {
+    display: none;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 40rem) and (min-width: 40rem) {
+  .texas-holdem-screen {
+    --cf-game-content-padding: 0.35rem 0.6rem;
+    --poker-card-width: clamp(2.35rem, 6.5vh, 2.8rem);
+  }
+
+  .holdem-table {
+    width: min(100%, 70rem);
+    grid-template-columns: minmax(9rem, 0.8fr) minmax(17rem, 1.6fr) minmax(9rem, 0.8fr);
+    grid-template-rows: minmax(0, 1fr);
+    gap: 0.6rem;
+    align-items: stretch;
+  }
+
+  .holdem-seat,
+  .holdem-seat--opponent,
+  .holdem-seat--human {
+    width: 100%;
+    padding: 0.45rem;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "identity"
+      "cards"
+      "state";
+    align-content: center;
+    justify-items: center;
+    gap: 0.4rem;
+  }
+
+  .holdem-seat--opponent { grid-column: 1; }
+  .holdem-board-zone { grid-column: 2; min-width: 0; }
+  .holdem-seat--human { grid-column: 3; }
+
+  .holdem-seat__identity {
+    width: 100%;
+  }
+
+  .holdem-seat__avatar {
+    width: 2rem;
+    height: 2rem;
+    flex-basis: 2rem;
+  }
+
+  .holdem-seat__cards {
+    justify-content: center;
+  }
+
+  .holdem-seat__state {
+    max-width: 100%;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .holdem-seat__state > em {
+    width: 100%;
+    text-align: center;
+  }
+
+  .holdem-pot > span {
+    min-height: 1.8rem;
+  }
+
+  .holdem-action-dock {
+    padding-block: var(--cf-space-1);
+  }
+
+  .holdem-raise-editor {
+    grid-template-columns: auto minmax(9rem, 1fr) minmax(15rem, 1.2fr);
+    align-items: center;
+    gap: var(--cf-space-2);
+  }
+
+  .holdem-raise-editor__amount {
+    min-width: 8rem;
+  }
+
+  .holdem-raise-editor input[type="range"] {
+    min-height: var(--cf-touch-target);
+  }
+
+  .holdem-raise-presets button {
+    min-height: var(--cf-touch-target);
+  }
+}
+
+@media (min-width: 64rem) and (min-height: 42rem) {
+  .holdem-table {
+    grid-template-rows: auto minmax(13rem, 1fr) auto;
+  }
+
+  .holdem-seat--opponent {
+    width: min(78%, 38rem);
+  }
+
+  .holdem-seat--human {
+    width: min(86%, 44rem);
+  }
+
+  .texas-holdem-screen.is-raising .holdem-table {
+    grid-template-rows: auto minmax(10.5rem, 1fr) auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .holdem-seat,
+  .holdem-thinking-dots b {
+    transition: none;
+    animation: none;
+  }
+}
+
+@keyframes holdem-thinking {
+  to { opacity: 0.28; transform: translateY(-0.12rem); }
+}
